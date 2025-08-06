@@ -179,9 +179,7 @@ class ONNXSamPredictor:
             'image_embeddings': self.features,
             'point_coords': coords,
             'point_labels': labels,
-            'mask_input': mask_input,
-            'has_mask_input': has_mask_input,
-            'orig_im_size': orig_im_size
+            'mask_input': mask_input
         }
         
         decoder_outputs = self.decoder_session.run(self.decoder_output_names, decoder_inputs)
