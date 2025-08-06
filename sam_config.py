@@ -14,6 +14,7 @@ class SAMBackend(Enum):
     """Available SAM inference backends."""
     PYTORCH = "pytorch"
     ONNX = "onnx"
+    TENSORRT = "tensorrt"
     AUTO = "auto"  # Automatically choose the best available backend
 
 class SAMConfig:
@@ -25,9 +26,11 @@ class SAMConfig:
         model_type: str = "vit_h",
         use_gpu: bool = True,
         onnx_providers: Optional[List[str]] = None,
+        tensorrt_precision: str = "fp16",
         performance_mode: bool = False,
         model_dir: str = "model",
-        onnx_dir: str = "model/onnx"
+        onnx_dir: str = "model/onnx",
+        tensorrt_dir: str = "model/tensorrt"
     ):
         """
         Initialize SAM configuration.
@@ -37,16 +40,20 @@ class SAMConfig:
             model_type: SAM model type ('vit_h', 'vit_l', 'vit_b')
             use_gpu: Whether to use GPU acceleration
             onnx_providers: ONNX Runtime execution providers
+            tensorrt_precision: TensorRT precision mode ('fp32', 'fp16', 'int8')
             performance_mode: Whether to prioritize speed over quality
             model_dir: Directory containing PyTorch models
             onnx_dir: Directory containing ONNX models
+            tensorrt_dir: Directory containing TensorRT engines
         """
         self.backend = backend
         self.model_type = model_type
         self.use_gpu = use_gpu
+        self.tensorrt_precision = tensorrt_precision
         self.performance_mode = performance_mode
         self.model_dir = Path(model_dir)
         self.onnx_dir = Path(onnx_dir)
+        self.tensorrt_dir = Path(tensorrt_dir)
         
         # Set ONNX providers
         if onnx_providers is None:
@@ -86,9 +93,27 @@ class SAMConfig:
         encoder_path, decoder_path = self.get_onnx_model_paths()
         return encoder_path is not None and decoder_path is not None
     
+    def get_tensorrt_model_paths(self) -> tuple[Optional[Path], Optional[Path]]:
+        """Get paths to TensorRT encoder and decoder engines."""
+        encoder_path = self.tensorrt_dir / f"sam_{self.model_type}_encoder_{self.tensorrt_precision}.trt"
+        decoder_path = self.tensorrt_dir / f"sam_{self.model_type}_decoder_{self.tensorrt_precision}.trt"
+        
+        encoder_exists = encoder_path.exists()
+        decoder_exists = decoder_path.exists()
+        
+        return (
+            encoder_path if encoder_exists else None,
+            decoder_path if decoder_exists else None
+        )
+    
     def is_pytorch_available(self) -> bool:
         """Check if PyTorch model is available."""
         return self.get_pytorch_model_path() is not None
+    
+    def is_tensorrt_available(self) -> bool:
+        """Check if TensorRT models are available."""
+        encoder_path, decoder_path = self.get_tensorrt_model_paths()
+        return encoder_path is not None and decoder_path is not None
     
     def resolve_backend(self) -> SAMBackend:
         """
@@ -107,13 +132,21 @@ class SAMConfig:
                 raise RuntimeError(f"ONNX models {self.model_type} not found in {self.onnx_dir}")
             return SAMBackend.ONNX
         
+        elif self.backend == SAMBackend.TENSORRT:
+            if not self.is_tensorrt_available():
+                raise RuntimeError(f"TensorRT models {self.model_type} not found in {self.tensorrt_dir}")
+            return SAMBackend.TENSORRT
+        
         elif self.backend == SAMBackend.AUTO:
-            # Prefer ONNX for better performance, fallback to PyTorch
-            if self.is_onnx_available():
+            # Prefer TensorRT for best performance, then ONNX, fallback to PyTorch
+            if self.is_tensorrt_available():
+                print(f"Auto-selected TensorRT backend for {self.model_type}")
+                return SAMBackend.TENSORRT
+            elif self.is_onnx_available():
                 print(f"Auto-selected ONNX backend for {self.model_type}")
                 return SAMBackend.ONNX
             elif self.is_pytorch_available():
-                print(f"Auto-selected PyTorch backend for {self.model_type} (ONNX not available)")
+                print(f"Auto-selected PyTorch backend for {self.model_type} (TensorRT/ONNX not available)")
                 return SAMBackend.PYTORCH
             else:
                 raise RuntimeError(f"No SAM models found for {self.model_type}")
@@ -150,17 +183,21 @@ class SAMConfig:
         
         model_type = os.getenv('SAM_MODEL_TYPE', 'vit_h')
         use_gpu = os.getenv('SAM_USE_GPU', 'true').lower() == 'true'
+        tensorrt_precision = os.getenv('SAM_TENSORRT_PRECISION', 'fp16')
         performance_mode = os.getenv('SAM_PERFORMANCE_MODE', 'false').lower() == 'true'
         model_dir = os.getenv('SAM_MODEL_DIR', 'model')
         onnx_dir = os.getenv('SAM_ONNX_DIR', 'model/onnx')
+        tensorrt_dir = os.getenv('SAM_TENSORRT_DIR', 'model/tensorrt')
         
         return cls(
             backend=backend,
             model_type=model_type,
             use_gpu=use_gpu,
+            tensorrt_precision=tensorrt_precision,
             performance_mode=performance_mode,
             model_dir=model_dir,
-            onnx_dir=onnx_dir
+            onnx_dir=onnx_dir,
+            tensorrt_dir=tensorrt_dir
         )
     
     def __str__(self) -> str:

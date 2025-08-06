@@ -1,0 +1,28 @@
+[
+  {
+    "backend": "PyTorch",
+    "init_time": 4.227477312088013,
+    "inference_times": [
+      131.122056722641,
+      130.02162671089172,
+      128.4066686630249
+    ],
+    "avg_inference_time": 129.8501173655192,
+    "std_inference_time": 1.1151665556435921,
+    "mask_counts": [
+      32,
+      32,
+      32
+    ],
+    "avg_mask_count": 32.0,
+    "gpu_memory_mb": 0,
+    "cpu_memory_mb": 166.51953125,
+    "device": "cuda"
+  },
+  {
+    "error": "ONNX benchmark failed: No module named 'onnxruntime'"
+  },
+  {
+    "error": "TensorRT models not found. Run convert_to_tensorrt.py first"
+  }
+]
