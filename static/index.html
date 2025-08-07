@@ -548,6 +548,185 @@
             color: #ffd700;
         }
 
+        /* Batch processing styles */
+        .mode-toggle-btn {
+            margin: 0 10px;
+            border-radius: 20px;
+            padding: 10px 20px;
+        }
+
+        .mode-toggle-btn.active {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        }
+
+        .batch-file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+        }
+
+        .batch-file-info {
+            flex: 1;
+        }
+
+        .batch-file-name {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .batch-file-size {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+
+        .batch-remove-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            width: 25px;
+            height: 25px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .batch-remove-btn:hover {
+            background: #c82333;
+        }
+
+        .batch-progress-container {
+            background: #e9ecef;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .batch-file-progress {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .batch-file-progress:last-child {
+            border-bottom: none;
+        }
+
+        .batch-progress-bar {
+            width: 60%;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .batch-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .batch-status {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .batch-status.processing {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .batch-status.completed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .batch-status.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .batch-results-section {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .batch-summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .batch-summary-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+            border-left: 4px solid #667eea;
+        }
+
+        .batch-individual-results {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            background: white;
+        }
+
+        .batch-result-item {
+            padding: 15px;
+            border-bottom: 1px solid #f1f3f4;
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .batch-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .batch-result-filename {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .batch-result-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+
+        .batch-result-stat {
+            text-align: center;
+        }
+
+        .batch-result-stat-value {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .batch-result-stat-label {
+            color: #6c757d;
+            font-size: 0.8rem;
+        }
+
         .satellite-mask-highlight {
             position: absolute;
             border: 3px solid #ffff00;
@@ -600,21 +779,59 @@
 
         <div class="main-card">
             <div class="upload-section">
-                <h2>Upload Image for Analysis</h2>
-                <div class="upload-area" id="uploadArea">
-                    <div class="upload-icon">
-                        <i class="fas fa-cloud-upload-alt"></i>
-                    </div>
-                    <h3>Drop your image here or click to browse</h3>
-                    <p>Supported formats: PNG, JPG, JPEG, TIFF, BMP</p>
-                    <input type="file" id="fileInput" class="file-input" accept="image/*">
+                <div class="processing-mode-toggle" style="text-align: center; margin-bottom: 20px;">
+                    <button class="btn mode-toggle-btn active" id="singleModeBtn" onclick="switchProcessingMode('single')">
+                        <i class="fas fa-image"></i> Single Image
+                    </button>
+                    <button class="btn mode-toggle-btn" id="batchModeBtn" onclick="switchProcessingMode('batch')">
+                        <i class="fas fa-images"></i> Batch Processing
+                    </button>
                 </div>
-                <button class="btn" onclick="document.getElementById('fileInput').click()">
-                    <i class="fas fa-folder-open"></i> Browse Files
-                </button>
-                <button class="btn" id="analyzeBtn" onclick="analyzeImage()" disabled>
-                    <i class="fas fa-microscope"></i> Analyze Image
-                </button>
+
+                <!-- Single Image Processing -->
+                <div id="singleProcessingSection">
+                    <h2>Upload Image for Analysis</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-icon">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                        </div>
+                        <h3>Drop your image here or click to browse</h3>
+                        <p>Supported formats: PNG, JPG, JPEG, TIFF, BMP</p>
+                        <input type="file" id="fileInput" class="file-input" accept="image/*">
+                    </div>
+                    <button class="btn" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-folder-open"></i> Browse Files
+                    </button>
+                    <button class="btn" id="analyzeBtn" onclick="analyzeImage()" disabled>
+                        <i class="fas fa-microscope"></i> Analyze Image
+                    </button>
+                </div>
+
+                <!-- Batch Processing -->
+                <div id="batchProcessingSection" style="display: none;">
+                    <h2>Batch Process Multiple Images</h2>
+                    <div class="upload-area" id="batchUploadArea">
+                        <div class="upload-icon">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                        </div>
+                        <h3>Drop multiple images here or click to browse</h3>
+                        <p>Select multiple files: PNG, JPG, JPEG, TIFF, BMP</p>
+                        <input type="file" id="batchFileInput" class="file-input" accept="image/*" multiple>
+                    </div>
+                    <div id="selectedFilesDisplay" style="margin-top: 15px; display: none;">
+                        <h4>Selected Files:</h4>
+                        <div id="filesList" style="max-height: 150px; overflow-y: auto; border: 1px solid #e9ecef; border-radius: 8px; padding: 10px;"></div>
+                    </div>
+                    <button class="btn" onclick="document.getElementById('batchFileInput').click()">
+                        <i class="fas fa-folder-open"></i> Select Multiple Files
+                    </button>
+                    <button class="btn" id="batchAnalyzeBtn" onclick="analyzeBatchImages()" disabled>
+                        <i class="fas fa-microscope"></i> Analyze Batch
+                    </button>
+                    <button class="btn" id="clearBatchBtn" onclick="clearBatchSelection()" style="background: #dc3545;">
+                        <i class="fas fa-trash"></i> Clear Selection
+                    </button>
+                </div>
             </div>
 
             <div class="mode-selection-section">
@@ -683,6 +900,52 @@
             <div class="stats-section" id="statsSection">
                 <!-- Detailed statistics will be populated here -->
             </div>
+
+            <!-- Batch Progress Section -->
+            <div class="batch-progress-container" id="batchProgressContainer">
+                <h3><i class="fas fa-tasks"></i> Batch Processing Progress</h3>
+                <div id="batchProgressList">
+                    <!-- Individual file progress will be shown here -->
+                </div>
+                <div class="stats-grid" style="margin-top: 20px;">
+                    <div class="stat-card">
+                        <div class="stat-value" id="batchProgressTotal">0</div>
+                        <div class="stat-label">Total Files</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="batchProgressCompleted">0</div>
+                        <div class="stat-label">Completed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="batchProgressFailed">0</div>
+                        <div class="stat-label">Failed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="batchProgressTime">0s</div>
+                        <div class="stat-label">Total Time</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Batch Results Section -->
+            <div class="batch-results-section" id="batchResultsSection">
+                <h3><i class="fas fa-chart-line"></i> Batch Analysis Results</h3>
+                
+                <div class="batch-summary-cards" id="batchSummaryCards">
+                    <!-- Summary statistics will be populated here -->
+                </div>
+
+                <h4>Individual File Results</h4>
+                <div class="batch-individual-results" id="batchIndividualResults">
+                    <!-- Individual file results will be populated here -->
+                </div>
+
+                <div style="text-align: center; margin-top: 20px;">
+                    <button class="btn" id="downloadBatchExcelBtn" onclick="downloadBatchExcel()" style="display: none;">
+                        <i class="fas fa-file-excel"></i> Download Batch Excel Report
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div class="footer">
@@ -694,6 +957,9 @@
         let selectedFile = null;
         let analysisResult = null;
         let currentMode = 'multiple'; // Default mode
+        let processingMode = 'single'; // 'single' or 'batch'
+        let selectedFiles = [];
+        let batchResult = null;
 
         // File upload handling
         const uploadArea = document.getElementById('uploadArea');
@@ -728,6 +994,465 @@
                 handleFileSelect(e.target.files[0]);
             }
         });
+
+        // Batch file input handling
+        const batchFileInput = document.getElementById('batchFileInput');
+        const batchUploadArea = document.getElementById('batchUploadArea');
+        const batchAnalyzeBtn = document.getElementById('batchAnalyzeBtn');
+
+        // Batch drag and drop functionality
+        batchUploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            batchUploadArea.classList.add('dragover');
+        });
+
+        batchUploadArea.addEventListener('dragleave', () => {
+            batchUploadArea.classList.remove('dragover');
+        });
+
+        batchUploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            batchUploadArea.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            handleBatchFileSelect(files);
+        });
+
+        batchUploadArea.addEventListener('click', () => {
+            batchFileInput.click();
+        });
+
+        batchFileInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            handleBatchFileSelect(files);
+        });
+
+        function switchProcessingMode(mode) {
+            processingMode = mode;
+            
+            const singleBtn = document.getElementById('singleModeBtn');
+            const batchBtn = document.getElementById('batchModeBtn');
+            const singleSection = document.getElementById('singleProcessingSection');
+            const batchSection = document.getElementById('batchProcessingSection');
+            
+            if (mode === 'single') {
+                singleBtn.classList.add('active');
+                batchBtn.classList.remove('active');
+                singleSection.style.display = 'block';
+                batchSection.style.display = 'none';
+                
+                // Hide batch results
+                document.getElementById('batchProgressContainer').style.display = 'none';
+                document.getElementById('batchResultsSection').style.display = 'none';
+            } else {
+                batchBtn.classList.add('active');
+                singleBtn.classList.remove('active');
+                singleSection.style.display = 'none';
+                batchSection.style.display = 'block';
+                
+                // Hide single results
+                document.getElementById('progressContainer').style.display = 'none';
+                document.getElementById('resultsSection').style.display = 'none';
+            }
+        }
+
+        function handleBatchFileSelect(files) {
+            const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/tiff', 'image/bmp'];
+            const validFiles = [];
+
+            for (let file of files) {
+                if (!allowedTypes.includes(file.type)) {
+                    showError(`Invalid file type: ${file.name}. Only PNG, JPG, JPEG, TIFF, BMP are supported.`);
+                    continue;
+                }
+
+                if (file.size > 50 * 1024 * 1024) { // 50MB limit
+                    showError(`File too large: ${file.name}. Maximum size is 50MB.`);
+                    continue;
+                }
+
+                validFiles.push(file);
+            }
+
+            // Add to selected files (avoid duplicates)
+            for (let file of validFiles) {
+                const exists = selectedFiles.some(f => f.name === file.name && f.size === file.size);
+                if (!exists) {
+                    selectedFiles.push(file);
+                }
+            }
+
+            updateBatchFileDisplay();
+            batchAnalyzeBtn.disabled = selectedFiles.length === 0;
+        }
+
+        function updateBatchFileDisplay() {
+            const display = document.getElementById('selectedFilesDisplay');
+            const filesList = document.getElementById('filesList');
+
+            if (selectedFiles.length > 0) {
+                display.style.display = 'block';
+                filesList.innerHTML = selectedFiles.map((file, index) => `
+                    <div class="batch-file-item">
+                        <div class="batch-file-info">
+                            <div class="batch-file-name">${file.name}</div>
+                            <div class="batch-file-size">${formatFileSize(file.size)}</div>
+                        </div>
+                        <button class="batch-remove-btn" onclick="removeBatchFile(${index})" title="Remove file">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `).join('');
+            } else {
+                display.style.display = 'none';
+            }
+        }
+
+        function removeBatchFile(index) {
+            selectedFiles.splice(index, 1);
+            updateBatchFileDisplay();
+            batchAnalyzeBtn.disabled = selectedFiles.length === 0;
+        }
+
+        function clearBatchSelection() {
+            selectedFiles = [];
+            updateBatchFileDisplay();
+            batchAnalyzeBtn.disabled = true;
+            document.getElementById('batchProgressContainer').style.display = 'none';
+            document.getElementById('batchResultsSection').style.display = 'none';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        async function analyzeBatchImages() {
+            if (selectedFiles.length === 0) {
+                showError('Please select images first');
+                return;
+            }
+
+            // Show progress
+            showBatchProgress();
+            batchAnalyzeBtn.disabled = true;
+
+            try {
+                // Prepare FormData for file upload
+                const formData = new FormData();
+                for (let file of selectedFiles) {
+                    formData.append('files', file);
+                }
+
+                // Add configuration parameters
+                formData.append('mode', currentMode);
+                formData.append('overlap_threshold', '80');
+                formData.append('min_circularity', '0.53');
+                formData.append('max_blob_distance', '50');
+                
+                // Add fluorescent mode parameter
+                const fluorescentMode = document.getElementById('fluorescentMode').checked;
+                formData.append('fluorescent_mode', fluorescentMode.toString());
+
+                // Make API request
+                const response = await fetch('/batch_process_files', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    batchResult = result;
+                    displayBatchResults(result);
+                    showSuccess(`Batch processing completed! ${result.batch_summary.successful_files}/${result.batch_summary.total_files} files processed successfully.`);
+                } else {
+                    showError(result.error || 'Batch processing failed');
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                showError('Network error: ' + error.message);
+            } finally {
+                hideBatchProgress();
+                batchAnalyzeBtn.disabled = false;
+            }
+        }
+
+        function showBatchProgress() {
+            document.getElementById('batchProgressContainer').style.display = 'block';
+            document.getElementById('batchResultsSection').style.display = 'none';
+            
+            // Update progress display
+            document.getElementById('batchProgressTotal').textContent = selectedFiles.length;
+            document.getElementById('batchProgressCompleted').textContent = '0';
+            document.getElementById('batchProgressFailed').textContent = '0';
+            document.getElementById('batchProgressTime').textContent = '0s';
+
+            // Show individual file progress
+            const progressList = document.getElementById('batchProgressList');
+            progressList.innerHTML = selectedFiles.map((file, index) => `
+                <div class="batch-file-progress" id="fileProgress${index}">
+                    <div style="flex: 1;">
+                        <div class="batch-file-name">${file.name}</div>
+                        <div class="batch-file-size">${formatFileSize(file.size)}</div>
+                    </div>
+                    <div class="batch-progress-bar">
+                        <div class="batch-progress-fill" id="progressFill${index}"></div>
+                    </div>
+                    <div class="batch-status processing" id="status${index}">Processing...</div>
+                </div>
+            `).join('');
+
+            // Simulate progress updates
+            let completed = 0;
+            const interval = setInterval(() => {
+                // Update random files progress
+                for (let i = 0; i < selectedFiles.length; i++) {
+                    const fillElement = document.getElementById(`progressFill${i}`);
+                    const statusElement = document.getElementById(`status${i}`);
+                    
+                    if (statusElement.textContent === 'Processing...') {
+                        let currentWidth = parseInt(fillElement.style.width) || 0;
+                        currentWidth += Math.random() * 15;
+                        
+                        if (currentWidth >= 100 && Math.random() > 0.7) {
+                            fillElement.style.width = '100%';
+                            statusElement.textContent = 'Completed';
+                            statusElement.className = 'batch-status completed';
+                            completed++;
+                            document.getElementById('batchProgressCompleted').textContent = completed;
+                        } else if (currentWidth < 100) {
+                            fillElement.style.width = Math.min(currentWidth, 95) + '%';
+                        }
+                    }
+                }
+
+                if (completed >= selectedFiles.length * 0.8) {
+                    clearInterval(interval);
+                }
+            }, 1000);
+
+            window.batchProgressInterval = interval;
+        }
+
+        function hideBatchProgress() {
+            if (window.batchProgressInterval) {
+                clearInterval(window.batchProgressInterval);
+            }
+        }
+
+        function displayBatchResults(result) {
+            document.getElementById('batchProgressContainer').style.display = 'none';
+            document.getElementById('batchResultsSection').style.display = 'block';
+
+            const summary = result.batch_summary;
+            const individualResults = result.individual_results;
+
+            // Display summary cards
+            const summaryCards = document.getElementById('batchSummaryCards');
+            summaryCards.innerHTML = `
+                <div class="batch-summary-card">
+                    <div class="stat-value">${summary.total_files}</div>
+                    <div class="stat-label">Total Files</div>
+                </div>
+                <div class="batch-summary-card">
+                    <div class="stat-value">${summary.successful_files}</div>
+                    <div class="stat-label">Successful</div>
+                </div>
+                <div class="batch-summary-card">
+                    <div class="stat-value">${summary.failed_files}</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+                <div class="batch-summary-card">
+                    <div class="stat-value">${summary.total_processing_time.toFixed(1)}s</div>
+                    <div class="stat-label">Total Time</div>
+                </div>
+                <div class="batch-summary-card">
+                    <div class="stat-value">${summary.average_processing_time.toFixed(1)}s</div>
+                    <div class="stat-label">Avg Time</div>
+                </div>
+                <div class="batch-summary-card">
+                    <div class="stat-value">${summary.mode}</div>
+                    <div class="stat-label">Mode</div>
+                </div>
+            `;
+
+            // Add mode-specific summary cards
+            if (currentMode === 'droplet' || currentMode === 'huge_droplet') {
+                if (summary.total_masks_found !== undefined) {
+                    summaryCards.innerHTML += `
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.total_masks_found}</div>
+                            <div class="stat-label">Total Droplets</div>
+                        </div>
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.average_diameter_across_batch ? summary.average_diameter_across_batch.toFixed(1) : 0}px</div>
+                            <div class="stat-label">Avg Diameter</div>
+                        </div>
+                    `;
+                }
+            } else if (currentMode === 'satellite_droplet') {
+                if (summary.total_group1_masks !== undefined) {
+                    summaryCards.innerHTML += `
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.total_group1_masks}</div>
+                            <div class="stat-label">Group 1 Total</div>
+                        </div>
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.total_group2_masks}</div>
+                            <div class="stat-label">Group 2 Total</div>
+                        </div>
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.batch_group1_avg_diameter ? summary.batch_group1_avg_diameter.toFixed(1) : 0}px</div>
+                            <div class="stat-label">Group 1 Avg</div>
+                        </div>
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.batch_group2_avg_diameter ? summary.batch_group2_avg_diameter.toFixed(1) : 0}px</div>
+                            <div class="stat-label">Group 2 Avg</div>
+                        </div>
+                    `;
+                }
+            } else if (currentMode === 'multiple') {
+                if (summary.total_large_masks !== undefined) {
+                    summaryCards.innerHTML += `
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.total_large_masks}</div>
+                            <div class="stat-label">Large Masks</div>
+                        </div>
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.total_overlaps}</div>
+                            <div class="stat-label">Total Overlaps</div>
+                        </div>
+                        <div class="batch-summary-card">
+                            <div class="stat-value">${summary.average_overlap_percentage ? summary.average_overlap_percentage.toFixed(1) : 0}%</div>
+                            <div class="stat-label">Avg Overlap %</div>
+                        </div>
+                    `;
+                }
+            }
+
+            // Display individual results
+            const individualDiv = document.getElementById('batchIndividualResults');
+            individualDiv.innerHTML = individualResults.map(result => {
+                if (!result.success) {
+                    return `
+                        <div class="batch-result-item">
+                            <div class="batch-result-filename">${result.filename}</div>
+                            <div style="color: #dc3545;">❌ Failed: ${result.error}</div>
+                            <div class="batch-status failed">Failed</div>
+                        </div>
+                    `;
+                }
+
+                let statsHtml = '';
+                if (currentMode === 'droplet' || currentMode === 'huge_droplet') {
+                    statsHtml = `
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.mask_count}</div>
+                            <div class="batch-result-stat-label">Droplets</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.average_diameter.toFixed(1)}px</div>
+                            <div class="batch-result-stat-label">Avg Diameter</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.processing_time.toFixed(1)}s</div>
+                            <div class="batch-result-stat-label">Time</div>
+                        </div>
+                    `;
+                } else if (currentMode === 'satellite_droplet') {
+                    statsHtml = `
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.group1_count}</div>
+                            <div class="batch-result-stat-label">Group 1</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.group2_count}</div>
+                            <div class="batch-result-stat-label">Group 2</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.processing_time.toFixed(1)}s</div>
+                            <div class="batch-result-stat-label">Time</div>
+                        </div>
+                    `;
+                } else if (currentMode === 'multiple') {
+                    statsHtml = `
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.total_large_masks}</div>
+                            <div class="batch-result-stat-label">Large Masks</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.total_overlaps_found}</div>
+                            <div class="batch-result-stat-label">Overlaps</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.overall_overlap_percentage.toFixed(1)}%</div>
+                            <div class="batch-result-stat-label">Overlap %</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.processing_time.toFixed(1)}s</div>
+                            <div class="batch-result-stat-label">Time</div>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="batch-result-item">
+                        <div class="batch-result-filename">${result.filename}</div>
+                        <div class="batch-result-stats">${statsHtml}</div>
+                        <div class="batch-status completed">✅ Completed</div>
+                    </div>
+                `;
+            }).join('');
+
+            // Show download button
+            document.getElementById('downloadBatchExcelBtn').style.display = 'inline-block';
+        }
+
+        function downloadBatchExcel() {
+            if (!batchResult) {
+                showError('No batch results available for download');
+                return;
+            }
+
+            const downloadData = {
+                batch_results: batchResult.individual_results,
+                mode: currentMode,
+                configuration: batchResult.batch_summary.configuration,
+                filename: `batch_${currentMode}_results_${Date.now()}.xlsx`
+            };
+
+            fetch('/download_batch_excel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(downloadData)
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.blob();
+                }
+                throw new Error('Failed to generate Excel file');
+            })
+            .then(blob => {
+                const link = document.createElement('a');
+                link.href = window.URL.createObjectURL(blob);
+                link.download = downloadData.filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(link.href);
+                showSuccess('Batch Excel report downloaded successfully!');
+            })
+            .catch(error => {
+                console.error('Error downloading Excel:', error);
+                showError('Failed to download Excel file: ' + error.message);
+            });
+        }
 
         function selectMode(mode) {
             currentMode = mode;

@@ -14,21 +14,6 @@ import torch
 from PIL import Image
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 
-# Import ONNX and TensorRT SAM support
-from sam_config import SAMConfig, SAMBackend, ENV_CONFIG
-from onnx_sam_wrapper import load_onnx_sam
-# Import TensorRT wrapper - prioritize CPU-compatible version due to CUDA conflicts
-try:
-    from tensorrt_sam_wrapper_cpu import load_tensorrt_sam
-    print("🔧 Using CPU-compatible TensorRT wrapper for optimal performance")
-except ImportError:
-    try:
-        from tensorrt_sam_wrapper import load_tensorrt_sam
-        print("⚠️ Using standard TensorRT wrapper - may encounter CUDA conflicts")
-    except ImportError:
-        load_tensorrt_sam = None
-        print("❌ TensorRT wrapper not available")
-
 # Import our mask grouping utilities
 import sys
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -40,6 +25,28 @@ from mask_grouping.utils import (
     process_image_from_base64,
     masks_to_base64_images
 )
+
+def process_image_from_bytes(image_bytes: bytes) -> np.ndarray:
+    """
+    Convert image bytes to numpy array.
+    
+    Args:
+        image_bytes: Raw image bytes
+        
+    Returns:
+        RGB image as numpy array
+    """
+    # Convert bytes to PIL Image
+    pil_image = Image.open(io.BytesIO(image_bytes))
+    
+    # Convert to RGB if necessary
+    if pil_image.mode != 'RGB':
+        pil_image = pil_image.convert('RGB')
+    
+    # Convert to numpy array
+    image_array = np.array(pil_image)
+    
+    return image_array
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend requests
@@ -60,54 +67,49 @@ mask_generator = None
 mask_processor = None
 droplet_processor = None
 huge_droplet_processor = None
-sam_backend = None
-sam_config = None
+
+# Configuration for PyTorch-only mode
+MODEL_TYPE = os.getenv('SAM_MODEL_TYPE', 'vit_h')
+USE_GPU = os.getenv('SAM_USE_GPU', 'true').lower() == 'true'
+MODEL_DIR = Path(__file__).parent / "model"
 
 def initialize_sam():
-    """Initialize the SAM model with support for both PyTorch and ONNX backends."""
-    global sam_model, mask_generator, mask_processor, droplet_processor, huge_droplet_processor, sam_backend, sam_config
+    """Initialize the SAM model using PyTorch backend only."""
+    global sam_model, mask_generator, mask_processor, droplet_processor, huge_droplet_processor
     
     if sam_model is None:
-        print("Initializing SAM model...")
+        print("Initializing SAM model with PyTorch backend...")
+        print(f"Model type: {MODEL_TYPE}")
+        print(f"GPU enabled: {USE_GPU}")
         
-        # Load configuration from environment
-        sam_config = ENV_CONFIG
-        print(f"SAM Configuration: {sam_config}")
+        # Create model directory
+        MODEL_DIR.mkdir(exist_ok=True)
         
-        # Get project root
-        project_root = Path(__file__).parent
+        # Download model if not available
+        model_path = _get_pytorch_model_path()
+        if not model_path.exists():
+            print(f"Model not found at {model_path}")
+            print("Downloading PyTorch model...")
+            _download_pytorch_model()
         
-        # Create model directories
-        (project_root / "model").mkdir(exist_ok=True)
-        (project_root / "model" / "onnx").mkdir(exist_ok=True)
-        (project_root / "model" / "tensorrt").mkdir(exist_ok=True)
-        
-        # Determine which backend to use
-        try:
-            sam_backend = sam_config.resolve_backend()
-            print(f"Using SAM backend: {sam_backend.value}")
-        except RuntimeError as e:
-            print(f"Backend resolution failed: {e}")
-            # Try to download the PyTorch model as fallback
-            print("Attempting to download PyTorch model as fallback...")
-            _download_pytorch_model(project_root, sam_config.model_type)
-            sam_config.backend = SAMBackend.PYTORCH
-            sam_backend = SAMBackend.PYTORCH
-        
-        # Initialize based on backend
-        if sam_backend == SAMBackend.ONNX:
-            _initialize_onnx_backend(sam_config)
-        elif sam_backend == SAMBackend.TENSORRT:
-            _initialize_tensorrt_backend(sam_config)
-        else:
-            _initialize_pytorch_backend(sam_config, project_root)
+        # Initialize PyTorch backend
+        _initialize_pytorch_backend()
         
         print("SAM model initialized successfully!")
-        print(f"Backend: {sam_backend.value}")
-        print(f"Model type: {sam_config.model_type}")
+        print(f"Backend: PyTorch")
+        print(f"Model type: {MODEL_TYPE}")
         print("All processors ready for analysis")
 
-def _download_pytorch_model(project_root: Path, model_type: str):
+def _get_pytorch_model_path():
+    """Get the path to the PyTorch SAM model."""
+    model_files = {
+        "vit_h": "sam_vit_h_4b8939.pth",
+        "vit_l": "sam_vit_l_0b3195.pth", 
+        "vit_b": "sam_vit_b_01ec64.pth"
+    }
+    return MODEL_DIR / model_files[MODEL_TYPE]
+
+def _download_pytorch_model():
     """Download PyTorch SAM model if not available."""
     model_files = {
         "vit_h": "sam_vit_h_4b8939.pth",
@@ -121,59 +123,69 @@ def _download_pytorch_model(project_root: Path, model_type: str):
         "vit_b": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
     }
     
-    model_filename = model_files[model_type]
-    model_path = project_root / "model" / model_filename
+    model_filename = model_files[MODEL_TYPE]
+    model_path = MODEL_DIR / model_filename
     
     if not model_path.exists():
         import urllib.request
-        model_url = model_urls[model_type]
+        model_url = model_urls[MODEL_TYPE]
         print(f"Downloading {model_filename}...")
         urllib.request.urlretrieve(model_url, str(model_path))
         print("Download completed!")
 
-def _initialize_pytorch_backend(sam_config: SAMConfig, project_root: Path):
+def _initialize_pytorch_backend():
     """Initialize PyTorch SAM backend."""
     global sam_model, mask_generator, droplet_processor, huge_droplet_processor, mask_processor
     
     # Get model path
-    model_path = sam_config.get_pytorch_model_path()
-    if not model_path:
-        _download_pytorch_model(project_root, sam_config.model_type)
-        model_path = sam_config.get_pytorch_model_path()
+    model_path = _get_pytorch_model_path()
     
     # Initialize model
-    device = "cuda" if torch.cuda.is_available() and sam_config.use_gpu else "cpu"
+    device = "cuda" if torch.cuda.is_available() and USE_GPU else "cpu"
     print(f"Using device: {device}")
-    print(f"Loading PyTorch SAM model: {sam_config.model_type} from {model_path}")
+    print(f"Loading PyTorch SAM model: {MODEL_TYPE} from {model_path}")
     
-    sam_model = sam_model_registry[sam_config.model_type](checkpoint=str(model_path))
+    sam_model = sam_model_registry[MODEL_TYPE](checkpoint=str(model_path))
     sam_model.to(device=device)
     
-    # Get mask generator parameters
-    params = sam_config.get_mask_generator_params()
+    # High-quality default parameters (32 points per side, 3 crop layers)
+    points_per_side = 32
+    pred_iou_thresh = 0.88
+    stability_score_thresh = 0.95
+    min_mask_region_area = 100
+    
+    print(f"⚙️  Configuration:")
+    print(f"   - Points per side: {points_per_side}")
+    print(f"   - Crop layers: 3 (multiple/huge_droplet modes)")
+    print(f"   - IoU threshold: {pred_iou_thresh}")
+    print(f"   - Stability threshold: {stability_score_thresh}")
     
     # Create mask generator for multiple mode (crop_n_layers=3)
     mask_generator = SamAutomaticMaskGenerator(
         model=sam_model,
-        points_per_side=params.get("points_per_side", 32),
-        pred_iou_thresh=params.get("pred_iou_thresh", 0.88),
-        stability_score_thresh=params.get("stability_score_thresh", 0.95),
-        crop_n_layers=3,  # Enhanced for multiple mode
-        min_mask_region_area=params.get("min_mask_region_area", 100)
+        points_per_side=points_per_side,
+        pred_iou_thresh=pred_iou_thresh,
+        stability_score_thresh=stability_score_thresh,
+        crop_n_layers=3,  # High quality with 3 crop layers
+        min_mask_region_area=min_mask_region_area
     )
     
     # Create mask generator for droplet mode (crop_n_layers=1)
     droplet_mask_generator = SamAutomaticMaskGenerator(
         model=sam_model,
-        points_per_side=params.get("points_per_side", 32),
+        points_per_side=points_per_side,
         crop_n_layers=1,  # Basic SAM for droplet mode
+        min_mask_region_area=0  # More permissive for droplets
     )
     
     # Create mask generator for huge droplet mode (crop_n_layers=3)
     huge_droplet_mask_generator = SamAutomaticMaskGenerator(
         model=sam_model,
-        points_per_side=params.get("points_per_side", 32),
-        crop_n_layers=3,  # Enhanced SAM for huge droplet mode
+        points_per_side=points_per_side,
+        pred_iou_thresh=pred_iou_thresh,
+        stability_score_thresh=stability_score_thresh,
+        crop_n_layers=3,  # High quality with 3 crop layers
+        min_mask_region_area=min_mask_region_area
     )
     
     # Initialize our processors
@@ -181,124 +193,7 @@ def _initialize_pytorch_backend(sam_config: SAMConfig, project_root: Path):
     droplet_processor = DropletProcessor(droplet_mask_generator)
     huge_droplet_processor = HugeDropletProcessor(huge_droplet_mask_generator)
 
-def _initialize_onnx_backend(sam_config: SAMConfig):
-    """Initialize ONNX SAM backend."""
-    global sam_model, mask_generator, droplet_processor, huge_droplet_processor, mask_processor
-    
-    print(f"Loading ONNX SAM model: {sam_config.model_type}")
-    print(f"ONNX providers: {sam_config.onnx_providers}")
-    
-    # Get mask generator parameters
-    params = sam_config.get_mask_generator_params()
-    
-    try:
-        # Create mask generator for multiple mode (crop_n_layers=3 effect)
-        mask_generator = load_onnx_sam(
-            model_dir=str(sam_config.onnx_dir),
-            model_type=sam_config.model_type,
-            providers=sam_config.onnx_providers
-        )
-        mask_generator.points_per_side = params.get("points_per_side", 32)
-        mask_generator.pred_iou_thresh = params.get("pred_iou_thresh", 0.88)
-        mask_generator.stability_score_thresh = params.get("stability_score_thresh", 0.95)
-        mask_generator.min_mask_region_area = params.get("min_mask_region_area", 100)
-        
-        # For droplet mode, create a separate instance with basic settings
-        droplet_mask_generator = load_onnx_sam(
-            model_dir=str(sam_config.onnx_dir),
-            model_type=sam_config.model_type,
-            providers=sam_config.onnx_providers
-        )
-        droplet_mask_generator.points_per_side = params.get("points_per_side", 32)
-        droplet_mask_generator.min_mask_region_area = 0  # More permissive for droplets
-        
-        # For huge droplet mode, use same as multiple mode
-        huge_droplet_mask_generator = load_onnx_sam(
-            model_dir=str(sam_config.onnx_dir),
-            model_type=sam_config.model_type,
-            providers=sam_config.onnx_providers
-        )
-        huge_droplet_mask_generator.points_per_side = params.get("points_per_side", 32)
-        huge_droplet_mask_generator.pred_iou_thresh = params.get("pred_iou_thresh", 0.88)
-        huge_droplet_mask_generator.stability_score_thresh = params.get("stability_score_thresh", 0.95)
-        huge_droplet_mask_generator.min_mask_region_area = params.get("min_mask_region_area", 100)
-        
-        # Initialize our processors
-        mask_processor = MaskGroupingProcessor(mask_generator)
-        droplet_processor = DropletProcessor(droplet_mask_generator)
-        huge_droplet_processor = HugeDropletProcessor(huge_droplet_mask_generator)
-        
-        # Set a placeholder for sam_model (used by some parts of the code)
-        sam_model = "onnx_backend"
-        
-    except Exception as e:
-        print(f"Failed to initialize ONNX backend: {e}")
-        print("Falling back to PyTorch backend...")
-        sam_config.backend = SAMBackend.PYTORCH
-        _initialize_pytorch_backend(sam_config, Path(__file__).parent)
 
-def _initialize_tensorrt_backend(sam_config: SAMConfig):
-    """Initialize TensorRT SAM backend."""
-    global sam_model, mask_generator, droplet_processor, huge_droplet_processor, mask_processor
-    
-    print(f"Loading TensorRT SAM model: {sam_config.model_type}")
-    print(f"TensorRT precision: {sam_config.tensorrt_precision}")
-    
-    # Get mask generator parameters
-    params = sam_config.get_mask_generator_params()
-    
-    try:
-        if load_tensorrt_sam is None:
-            raise ImportError("TensorRT wrapper not available")
-        
-        # Create mask generator for multiple mode (enhanced performance)
-        mask_generator = load_tensorrt_sam(
-            model_dir=str(sam_config.tensorrt_dir),
-            model_type=sam_config.model_type,
-            precision=sam_config.tensorrt_precision,
-            points_per_side=params.get("points_per_side", 32),
-            pred_iou_thresh=params.get("pred_iou_thresh", 0.88),
-            stability_score_thresh=params.get("stability_score_thresh", 0.95),
-            min_mask_region_area=params.get("min_mask_region_area", 100)
-        )
-        
-        # For droplet mode, create a separate instance with basic settings
-        droplet_mask_generator = load_tensorrt_sam(
-            model_dir=str(sam_config.tensorrt_dir),
-            model_type=sam_config.model_type,
-            precision=sam_config.tensorrt_precision,
-            points_per_side=params.get("points_per_side", 32),
-            min_mask_region_area=0  # More permissive for droplets
-        )
-        
-        # For huge droplet mode, use same as multiple mode
-        huge_droplet_mask_generator = load_tensorrt_sam(
-            model_dir=str(sam_config.tensorrt_dir),
-            model_type=sam_config.model_type,
-            precision=sam_config.tensorrt_precision,
-            points_per_side=params.get("points_per_side", 32),
-            pred_iou_thresh=params.get("pred_iou_thresh", 0.88),
-            stability_score_thresh=params.get("stability_score_thresh", 0.95),
-            min_mask_region_area=params.get("min_mask_region_area", 100)
-        )
-        
-        # Initialize our processors
-        mask_processor = MaskGroupingProcessor(mask_generator)
-        droplet_processor = DropletProcessor(droplet_mask_generator)
-        huge_droplet_processor = HugeDropletProcessor(huge_droplet_mask_generator)
-        
-        # Set a placeholder for sam_model (used by some parts of the code)
-        sam_model = "tensorrt_backend"
-        
-        print("✅ TensorRT backend initialized successfully!")
-        print(f"   Precision: {sam_config.tensorrt_precision}")
-        print(f"   Model directory: {sam_config.tensorrt_dir}")
-        
-    except Exception as e:
-        print(f"Failed to initialize TensorRT backend: {e}")
-        print("Falling back to PyTorch backend...")
-        sam_config.backend = SAMBackend.PYTORCH
-        _initialize_pytorch_backend(sam_config, Path(__file__).parent)
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -306,8 +201,9 @@ def health_check():
     return jsonify({
         'status': 'healthy', 
         'model_loaded': sam_model is not None,
-        'model_type': 'vit_h' if sam_model is not None else None,
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+        'model_type': MODEL_TYPE if sam_model is not None else None,
+        'backend': 'pytorch',
+        'device': 'cuda' if torch.cuda.is_available() and USE_GPU else 'cpu'
     })
 
 @app.route('/')
@@ -775,7 +671,7 @@ def get_defaults():
         'max_blob_distance': 50,
         'fluorescent_mode': False,
         'min_brightness_threshold': 200,
-        'model_type': 'vit_h',
+        'model_type': MODEL_TYPE,
         'points_per_side': 32,
         'supported_formats': ['PNG', 'JPG', 'JPEG', 'TIFF', 'BMP'],
         'max_file_size_mb': 50
@@ -784,23 +680,29 @@ def get_defaults():
 @app.route('/backend_info', methods=['GET'])
 def backend_info():
     """Get information about the SAM backend and configuration."""
-    global sam_config, sam_backend
-    
     if sam_model is None:
         return jsonify({'error': 'Model not loaded'}), 500
     
     return jsonify({
-        'backend': sam_backend.value if sam_backend else 'unknown',
-        'model_type': sam_config.model_type if sam_config else 'unknown',
-        'use_gpu': sam_config.use_gpu if sam_config else False,
-        'performance_mode': sam_config.performance_mode if sam_config else False,
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'pytorch_available': sam_config.is_pytorch_available() if sam_config else False,
-        'onnx_available': sam_config.is_onnx_available() if sam_config else False,
-        'tensorrt_available': sam_config.is_tensorrt_available() if sam_config else False,
-        'onnx_providers': sam_config.onnx_providers if sam_config and sam_backend == SAMBackend.ONNX else None,
-        'tensorrt_precision': sam_config.tensorrt_precision if sam_config and sam_backend == SAMBackend.TENSORRT else None,
-        'config': str(sam_config) if sam_config else None
+        'backend': 'pytorch',
+        'model_type': MODEL_TYPE,
+        'use_gpu': USE_GPU,
+        'device': 'cuda' if torch.cuda.is_available() and USE_GPU else 'cpu',
+        'pytorch_available': True,
+        'onnx_available': False,
+        'tensorrt_available': False,
+        'model_path': str(_get_pytorch_model_path()),
+        'torch_version': torch.__version__,
+        'cuda_available': torch.cuda.is_available(),
+        'configuration': {
+            'points_per_side': 32,
+            'crop_layers_multiple': 3,
+            'crop_layers_droplet': 1,
+            'crop_layers_huge_droplet': 3,
+            'pred_iou_thresh': 0.88,
+            'stability_score_thresh': 0.95,
+            'min_mask_region_area': 100
+        }
     })
 
 @app.route('/model_info', methods=['GET'])
@@ -809,13 +711,11 @@ def model_info():
     if sam_model is None:
         return jsonify({'error': 'Model not loaded'}), 500
     
-    model_type = sam_config.model_type if sam_config else 'vit_h'
-    
     return jsonify({
         'model_loaded': True,
-        'model_type': model_type,
-        'backend': sam_backend.value if sam_backend else 'pytorch',
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+        'model_type': MODEL_TYPE,
+        'backend': 'pytorch',
+        'device': 'cuda' if torch.cuda.is_available() and USE_GPU else 'cpu',
         'modes': {
             'droplet': {
                 'crop_n_layers': 1,
@@ -1397,6 +1297,662 @@ def analyze_satellite_droplets():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/batch_process_files', methods=['POST'])
+def batch_process_files():
+    """Process multiple uploaded image files in batch mode."""
+    try:
+        # Initialize SAM if not already done
+        if sam_model is None:
+            initialize_sam()
+        
+        # Check if files were uploaded
+        if 'files' not in request.files:
+            return jsonify({'error': 'No files uploaded'}), 400
+        
+        files = request.files.getlist('files')
+        if not files or len(files) == 0:
+            return jsonify({'error': 'No files selected'}), 400
+        
+        # Get mode and configuration
+        mode = request.form.get('mode', 'multiple')
+        overlap_threshold = float(request.form.get('overlap_threshold', 80.0))
+        min_circularity = float(request.form.get('min_circularity', 0.53))
+        max_blob_distance = float(request.form.get('max_blob_distance', 50))
+        fluorescent_mode = request.form.get('fluorescent_mode', 'false').lower() == 'true'
+        min_brightness_threshold = float(request.form.get('min_brightness_threshold', 200))
+        
+        print(f"Batch processing {len(files)} files in {mode} mode")
+        print(f"Configuration: overlap_threshold={overlap_threshold}%, min_circularity={min_circularity}")
+        
+        # Process each file
+        batch_results = []
+        total_start_time = time.time()
+        
+        for file_idx, file in enumerate(files):
+            if file.filename == '':
+                continue
+                
+            try:
+                file_start_time = time.time()
+                
+                # Read and process image
+                image_data = file.read()
+                image_array = process_image_from_bytes(image_data)
+                print(f"Processing file {file_idx + 1}/{len(files)}: {file.filename} ({image_array.shape})")
+                
+                # Configure processors based on mode
+                if mode == 'droplet':
+                    processor = droplet_processor
+                    processor.min_circularity = min_circularity
+                    processor.max_blob_distance = max_blob_distance
+                elif mode == 'huge_droplet':
+                    processor = huge_droplet_processor
+                    processor.min_circularity = min_circularity
+                    processor.max_blob_distance = max_blob_distance
+                elif mode == 'satellite_droplet':
+                    processor = huge_droplet_processor
+                    processor.min_circularity = min_circularity
+                    processor.max_blob_distance = max_blob_distance
+                else:  # multiple mode
+                    processor = mask_processor
+                    processor.overlap_threshold = overlap_threshold / 100.0
+                    processor.min_circularity = min_circularity
+                    processor.max_blob_distance = max_blob_distance
+                    processor.fluorescent_mode = fluorescent_mode
+                    processor.min_brightness_threshold = min_brightness_threshold
+                
+                # Process the image
+                result = processor.process_image_array(image_array)
+                file_processing_time = time.time() - file_start_time
+                
+                # Create file-specific result
+                file_result = {
+                    'filename': file.filename,
+                    'file_index': file_idx,
+                    'processing_time': float(file_processing_time),
+                    'success': True,
+                    'mode': mode,
+                    'statistics': convert_numpy_types(result['statistics']),
+                    'total_masks': int(result['total_masks']),
+                    'filtered_masks': int(result['filtered_masks']),
+                    'image_shape': list(image_array.shape)
+                }
+                
+                # Add mode-specific data
+                if mode in ['droplet', 'huge_droplet']:
+                    file_result.update({
+                        'mask_count': result['statistics']['mask_count'],
+                        'average_diameter': float(result['statistics']['average_diameter']),
+                        'diameter_std': float(result['statistics']['diameter_std']),
+                        'min_diameter': float(result['statistics']['min_diameter']),
+                        'max_diameter': float(result['statistics']['max_diameter'])
+                    })
+                elif mode == 'satellite_droplet':
+                    # Add K-means clustering for satellite mode
+                    from mask_grouping.core import MaskGroupingProcessor
+                    temp_processor = MaskGroupingProcessor(processor.mask_generator)
+                    clustered_masks, _ = temp_processor._cluster_masks_kmeans(result['final_masks'], n_clusters=2)
+                    
+                    # Determine larger and smaller clusters
+                    if clustered_masks[0] and clustered_masks[1]:
+                        avg_area_0 = np.mean([mask['area'] for mask in clustered_masks[0]])
+                        avg_area_1 = np.mean([mask['area'] for mask in clustered_masks[1]])
+                        if avg_area_0 > avg_area_1:
+                            larger_cluster, smaller_cluster = clustered_masks[0], clustered_masks[1]
+                        else:
+                            larger_cluster, smaller_cluster = clustered_masks[1], clustered_masks[0]
+                    else:
+                        larger_cluster = clustered_masks[0] if clustered_masks[0] else clustered_masks[1]
+                        smaller_cluster = clustered_masks[1] if clustered_masks[0] else clustered_masks[0]
+                    
+                    # Calculate group statistics
+                    group1_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in smaller_cluster]
+                    group2_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
+                    
+                    file_result.update({
+                        'mask_count': result['statistics']['mask_count'],
+                        'average_diameter': float(result['statistics']['average_diameter']),
+                        'group1_count': len(group1_diameters),
+                        'group2_count': len(group2_diameters),
+                        'group1_avg_diameter': float(np.mean(group1_diameters)) if group1_diameters else 0,
+                        'group2_avg_diameter': float(np.mean(group2_diameters)) if group2_diameters else 0,
+                        'group1_diameters': [float(d) for d in group1_diameters],
+                        'group2_diameters': [float(d) for d in group2_diameters]
+                    })
+                else:  # multiple mode
+                    overlap_stats = result['statistics']
+                    final_masks = result['final_masks']
+                    total_overlaps = sum([mask.get('overlap_count', 0) for mask in final_masks])
+                    
+                    file_result.update({
+                        'total_large_masks': len(final_masks),
+                        'total_overlaps_found': int(total_overlaps),
+                        'overall_overlap_percentage': float(overlap_stats.get('overlap_percentage', 0.0)),
+                        'aggregate_masks_count': len(result.get('aggregate_masks', [])),
+                        'simple_masks_count': len(result.get('simple_masks', []))
+                    })
+                
+                batch_results.append(file_result)
+                print(f"✅ Completed {file.filename} in {file_processing_time:.2f}s")
+                
+            except Exception as e:
+                print(f"❌ Error processing {file.filename}: {e}")
+                batch_results.append({
+                    'filename': file.filename,
+                    'file_index': file_idx,
+                    'success': False,
+                    'error': str(e),
+                    'mode': mode
+                })
+        
+        total_processing_time = time.time() - total_start_time
+        
+        # Calculate batch summary statistics
+        successful_results = [r for r in batch_results if r.get('success', False)]
+        failed_results = [r for r in batch_results if not r.get('success', True)]
+        
+        batch_summary = {
+            'total_files': len(files),
+            'successful_files': len(successful_results),
+            'failed_files': len(failed_results),
+            'total_processing_time': float(total_processing_time),
+            'average_processing_time': float(np.mean([r['processing_time'] for r in successful_results])) if successful_results else 0,
+            'mode': mode,
+            'configuration': {
+                'overlap_threshold': overlap_threshold,
+                'min_circularity': min_circularity,
+                'max_blob_distance': max_blob_distance,
+                'fluorescent_mode': fluorescent_mode,
+                'min_brightness_threshold': min_brightness_threshold
+            }
+        }
+        
+        # Add mode-specific summary statistics
+        if mode in ['droplet', 'huge_droplet'] and successful_results:
+            batch_summary.update({
+                'total_masks_found': sum([r['mask_count'] for r in successful_results]),
+                'average_masks_per_image': float(np.mean([r['mask_count'] for r in successful_results])),
+                'average_diameter_across_batch': float(np.mean([r['average_diameter'] for r in successful_results]))
+            })
+        elif mode == 'satellite_droplet' and successful_results:
+            all_group1_diameters = []
+            all_group2_diameters = []
+            for r in successful_results:
+                all_group1_diameters.extend(r.get('group1_diameters', []))
+                all_group2_diameters.extend(r.get('group2_diameters', []))
+            
+            batch_summary.update({
+                'total_masks_found': sum([r['mask_count'] for r in successful_results]),
+                'total_group1_masks': len(all_group1_diameters),
+                'total_group2_masks': len(all_group2_diameters),
+                'batch_group1_avg_diameter': float(np.mean(all_group1_diameters)) if all_group1_diameters else 0,
+                'batch_group2_avg_diameter': float(np.mean(all_group2_diameters)) if all_group2_diameters else 0,
+                'all_group1_diameters': all_group1_diameters,
+                'all_group2_diameters': all_group2_diameters
+            })
+        elif mode == 'multiple' and successful_results:
+            batch_summary.update({
+                'total_large_masks': sum([r.get('total_large_masks', 0) for r in successful_results]),
+                'total_overlaps': sum([r.get('total_overlaps_found', 0) for r in successful_results]),
+                'average_overlap_percentage': float(np.mean([r.get('overall_overlap_percentage', 0) for r in successful_results]))
+            })
+        
+        print(f"🎉 Batch processing completed: {len(successful_results)}/{len(files)} files successful")
+        
+        return jsonify({
+            'success': True,
+            'batch_summary': batch_summary,
+            'individual_results': batch_results,
+            'failed_files': [r['filename'] for r in failed_results] if failed_results else []
+        })
+        
+    except Exception as e:
+        print(f"Error in batch_process_files: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/batch_process_base64', methods=['POST'])
+def batch_process_base64():
+    """Process multiple base64 encoded images in batch mode."""
+    try:
+        # Initialize SAM if not already done
+        if sam_model is None:
+            initialize_sam()
+        
+        # Get image data and configuration
+        data = request.get_json()
+        if not data or 'images' not in data:
+            return jsonify({'error': 'No image data provided'}), 400
+        
+        images = data['images']  # Expected to be list of {name: str, image: base64_string}
+        if not images or len(images) == 0:
+            return jsonify({'error': 'No images provided'}), 400
+        
+        # Get mode and configuration
+        mode = data.get('mode', 'multiple')
+        overlap_threshold = data.get('overlap_threshold', 80.0)
+        min_circularity = data.get('min_circularity', 0.53)
+        max_blob_distance = data.get('max_blob_distance', 50)
+        fluorescent_mode = data.get('fluorescent_mode', False)
+        min_brightness_threshold = data.get('min_brightness_threshold', 200)
+        
+        print(f"Batch processing {len(images)} base64 images in {mode} mode")
+        print(f"Configuration: overlap_threshold={overlap_threshold}%, min_circularity={min_circularity}")
+        
+        # Process each image
+        batch_results = []
+        total_start_time = time.time()
+        
+        for img_idx, img_data in enumerate(images):
+            try:
+                img_start_time = time.time()
+                
+                # Get image name and data
+                img_name = img_data.get('name', f'image_{img_idx + 1}')
+                img_base64 = img_data.get('image', '')
+                
+                if not img_base64:
+                    batch_results.append({
+                        'image_name': img_name,
+                        'image_index': img_idx,
+                        'success': False,
+                        'error': 'No image data provided',
+                        'mode': mode
+                    })
+                    continue
+                
+                # Process image from base64
+                image_array = process_image_from_base64(img_base64)
+                print(f"Processing image {img_idx + 1}/{len(images)}: {img_name} ({image_array.shape})")
+                
+                # Configure processors based on mode
+                if mode == 'droplet':
+                    processor = droplet_processor
+                    processor.min_circularity = min_circularity
+                    processor.max_blob_distance = max_blob_distance
+                elif mode == 'huge_droplet':
+                    processor = huge_droplet_processor
+                    processor.min_circularity = min_circularity
+                    processor.max_blob_distance = max_blob_distance
+                elif mode == 'satellite_droplet':
+                    processor = huge_droplet_processor
+                    processor.min_circularity = min_circularity
+                    processor.max_blob_distance = max_blob_distance
+                else:  # multiple mode
+                    processor = mask_processor
+                    processor.overlap_threshold = overlap_threshold / 100.0
+                    processor.min_circularity = min_circularity
+                    processor.max_blob_distance = max_blob_distance
+                    processor.fluorescent_mode = fluorescent_mode
+                    processor.min_brightness_threshold = min_brightness_threshold
+                
+                # Process the image
+                result = processor.process_image_array(image_array)
+                img_processing_time = time.time() - img_start_time
+                
+                # Create image-specific result
+                img_result = {
+                    'image_name': img_name,
+                    'image_index': img_idx,
+                    'processing_time': float(img_processing_time),
+                    'success': True,
+                    'mode': mode,
+                    'statistics': convert_numpy_types(result['statistics']),
+                    'total_masks': int(result['total_masks']),
+                    'filtered_masks': int(result['filtered_masks']),
+                    'image_shape': list(image_array.shape)
+                }
+                
+                # Add mode-specific data (same logic as file processing)
+                if mode in ['droplet', 'huge_droplet']:
+                    img_result.update({
+                        'mask_count': result['statistics']['mask_count'],
+                        'average_diameter': float(result['statistics']['average_diameter']),
+                        'diameter_std': float(result['statistics']['diameter_std']),
+                        'min_diameter': float(result['statistics']['min_diameter']),
+                        'max_diameter': float(result['statistics']['max_diameter'])
+                    })
+                elif mode == 'satellite_droplet':
+                    # Add K-means clustering for satellite mode
+                    from mask_grouping.core import MaskGroupingProcessor
+                    temp_processor = MaskGroupingProcessor(processor.mask_generator)
+                    clustered_masks, _ = temp_processor._cluster_masks_kmeans(result['final_masks'], n_clusters=2)
+                    
+                    # Determine larger and smaller clusters
+                    if clustered_masks[0] and clustered_masks[1]:
+                        avg_area_0 = np.mean([mask['area'] for mask in clustered_masks[0]])
+                        avg_area_1 = np.mean([mask['area'] for mask in clustered_masks[1]])
+                        if avg_area_0 > avg_area_1:
+                            larger_cluster, smaller_cluster = clustered_masks[0], clustered_masks[1]
+                        else:
+                            larger_cluster, smaller_cluster = clustered_masks[1], clustered_masks[0]
+                    else:
+                        larger_cluster = clustered_masks[0] if clustered_masks[0] else clustered_masks[1]
+                        smaller_cluster = clustered_masks[1] if clustered_masks[0] else clustered_masks[0]
+                    
+                    # Calculate group statistics
+                    group1_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in smaller_cluster]
+                    group2_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
+                    
+                    img_result.update({
+                        'mask_count': result['statistics']['mask_count'],
+                        'average_diameter': float(result['statistics']['average_diameter']),
+                        'group1_count': len(group1_diameters),
+                        'group2_count': len(group2_diameters),
+                        'group1_avg_diameter': float(np.mean(group1_diameters)) if group1_diameters else 0,
+                        'group2_avg_diameter': float(np.mean(group2_diameters)) if group2_diameters else 0,
+                        'group1_diameters': [float(d) for d in group1_diameters],
+                        'group2_diameters': [float(d) for d in group2_diameters]
+                    })
+                else:  # multiple mode
+                    overlap_stats = result['statistics']
+                    final_masks = result['final_masks']
+                    total_overlaps = sum([mask.get('overlap_count', 0) for mask in final_masks])
+                    
+                    img_result.update({
+                        'total_large_masks': len(final_masks),
+                        'total_overlaps_found': int(total_overlaps),
+                        'overall_overlap_percentage': float(overlap_stats.get('overlap_percentage', 0.0)),
+                        'aggregate_masks_count': len(result.get('aggregate_masks', [])),
+                        'simple_masks_count': len(result.get('simple_masks', []))
+                    })
+                
+                batch_results.append(img_result)
+                print(f"✅ Completed {img_name} in {img_processing_time:.2f}s")
+                
+            except Exception as e:
+                print(f"❌ Error processing {img_name}: {e}")
+                batch_results.append({
+                    'image_name': img_name,
+                    'image_index': img_idx,
+                    'success': False,
+                    'error': str(e),
+                    'mode': mode
+                })
+        
+        total_processing_time = time.time() - total_start_time
+        
+        # Calculate batch summary statistics (same logic as file processing)
+        successful_results = [r for r in batch_results if r.get('success', False)]
+        failed_results = [r for r in batch_results if not r.get('success', True)]
+        
+        batch_summary = {
+            'total_images': len(images),
+            'successful_images': len(successful_results),
+            'failed_images': len(failed_results),
+            'total_processing_time': float(total_processing_time),
+            'average_processing_time': float(np.mean([r['processing_time'] for r in successful_results])) if successful_results else 0,
+            'mode': mode,
+            'configuration': {
+                'overlap_threshold': overlap_threshold,
+                'min_circularity': min_circularity,
+                'max_blob_distance': max_blob_distance,
+                'fluorescent_mode': fluorescent_mode,
+                'min_brightness_threshold': min_brightness_threshold
+            }
+        }
+        
+        # Add mode-specific summary statistics
+        if mode in ['droplet', 'huge_droplet'] and successful_results:
+            batch_summary.update({
+                'total_masks_found': sum([r['mask_count'] for r in successful_results]),
+                'average_masks_per_image': float(np.mean([r['mask_count'] for r in successful_results])),
+                'average_diameter_across_batch': float(np.mean([r['average_diameter'] for r in successful_results]))
+            })
+        elif mode == 'satellite_droplet' and successful_results:
+            all_group1_diameters = []
+            all_group2_diameters = []
+            for r in successful_results:
+                all_group1_diameters.extend(r.get('group1_diameters', []))
+                all_group2_diameters.extend(r.get('group2_diameters', []))
+            
+            batch_summary.update({
+                'total_masks_found': sum([r['mask_count'] for r in successful_results]),
+                'total_group1_masks': len(all_group1_diameters),
+                'total_group2_masks': len(all_group2_diameters),
+                'batch_group1_avg_diameter': float(np.mean(all_group1_diameters)) if all_group1_diameters else 0,
+                'batch_group2_avg_diameter': float(np.mean(all_group2_diameters)) if all_group2_diameters else 0,
+                'all_group1_diameters': all_group1_diameters,
+                'all_group2_diameters': all_group2_diameters
+            })
+        elif mode == 'multiple' and successful_results:
+            batch_summary.update({
+                'total_large_masks': sum([r.get('total_large_masks', 0) for r in successful_results]),
+                'total_overlaps': sum([r.get('total_overlaps_found', 0) for r in successful_results]),
+                'average_overlap_percentage': float(np.mean([r.get('overall_overlap_percentage', 0) for r in successful_results]))
+            })
+        
+        print(f"🎉 Batch processing completed: {len(successful_results)}/{len(images)} images successful")
+        
+        return jsonify({
+            'success': True,
+            'batch_summary': batch_summary,
+            'individual_results': batch_results,
+            'failed_images': [r['image_name'] for r in failed_results] if failed_results else []
+        })
+        
+    except Exception as e:
+        print(f"Error in batch_process_base64: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download_batch_excel', methods=['POST'])
+def download_batch_excel():
+    """Generate and download Excel file with batch processing results."""
+    try:
+        # Get data from request
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        batch_results = data.get('batch_results', [])
+        mode = data.get('mode', 'multiple')
+        filename = data.get('filename', f'batch_{mode}_results.xlsx')
+        
+        if not batch_results:
+            return jsonify({'error': 'No batch results provided'}), 400
+        
+        # Create Excel file in memory
+        try:
+            import pandas as pd
+            from io import BytesIO
+            
+            excel_buffer = BytesIO()
+            
+            # Create different sheets based on mode
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                
+                if mode in ['droplet', 'huge_droplet']:
+                    # Create summary sheet
+                    summary_data = []
+                    for result in batch_results:
+                        if result.get('success', False):
+                            summary_data.append({
+                                'Filename': result.get('image_name', result.get('filename', 'Unknown')),
+                                'Mask Count': result.get('mask_count', 0),
+                                'Average Diameter (px)': result.get('average_diameter', 0),
+                                'Min Diameter (px)': result.get('min_diameter', 0),
+                                'Max Diameter (px)': result.get('max_diameter', 0),
+                                'Diameter Std Dev': result.get('diameter_std', 0),
+                                'Processing Time (s)': result.get('processing_time', 0)
+                            })
+                    
+                    if summary_data:
+                        df_summary = pd.DataFrame(summary_data)
+                        df_summary.to_excel(writer, sheet_name='Summary', index=False)
+                
+                elif mode == 'satellite_droplet':
+                    # Create summary sheet
+                    summary_data = []
+                    all_group1_data = []
+                    all_group2_data = []
+                    
+                    for result in batch_results:
+                        if result.get('success', False):
+                            filename = result.get('image_name', result.get('filename', 'Unknown'))
+                            summary_data.append({
+                                'Filename': filename,
+                                'Total Masks': result.get('mask_count', 0),
+                                'Group 1 Count': result.get('group1_count', 0),
+                                'Group 2 Count': result.get('group2_count', 0),
+                                'Group 1 Avg Diameter (px)': result.get('group1_avg_diameter', 0),
+                                'Group 2 Avg Diameter (px)': result.get('group2_avg_diameter', 0),
+                                'Processing Time (s)': result.get('processing_time', 0)
+                            })
+                            
+                            # Collect diameter data
+                            for diameter in result.get('group1_diameters', []):
+                                all_group1_data.append({'Filename': filename, 'Diameter (px)': diameter})
+                            for diameter in result.get('group2_diameters', []):
+                                all_group2_data.append({'Filename': filename, 'Diameter (px)': diameter})
+                    
+                    if summary_data:
+                        df_summary = pd.DataFrame(summary_data)
+                        df_summary.to_excel(writer, sheet_name='Summary', index=False)
+                    
+                    if all_group1_data:
+                        df_group1 = pd.DataFrame(all_group1_data)
+                        df_group1.to_excel(writer, sheet_name='Group 1 Diameters', index=False)
+                    
+                    if all_group2_data:
+                        df_group2 = pd.DataFrame(all_group2_data)
+                        df_group2.to_excel(writer, sheet_name='Group 2 Diameters', index=False)
+                
+                elif mode == 'multiple':
+                    # Create summary sheet
+                    summary_data = []
+                    for result in batch_results:
+                        if result.get('success', False):
+                            summary_data.append({
+                                'Filename': result.get('image_name', result.get('filename', 'Unknown')),
+                                'Total Large Masks': result.get('total_large_masks', 0),
+                                'Total Overlaps Found': result.get('total_overlaps_found', 0),
+                                'Overlap Percentage': result.get('overall_overlap_percentage', 0),
+                                'Aggregate Masks': result.get('aggregate_masks_count', 0),
+                                'Simple Masks': result.get('simple_masks_count', 0),
+                                'Processing Time (s)': result.get('processing_time', 0)
+                            })
+                    
+                    if summary_data:
+                        df_summary = pd.DataFrame(summary_data)
+                        df_summary.to_excel(writer, sheet_name='Summary', index=False)
+                
+                # Add configuration sheet
+                config_data = [
+                    ['Mode', mode],
+                    ['Total Files Processed', len(batch_results)],
+                    ['Successful Files', len([r for r in batch_results if r.get('success', False)])],
+                    ['Failed Files', len([r for r in batch_results if not r.get('success', True)])],
+                ]
+                
+                # Add configuration parameters from first successful result
+                successful_result = next((r for r in batch_results if r.get('success', False)), None)
+                if successful_result and 'configuration' in data:
+                    config = data['configuration']
+                    config_data.extend([
+                        ['Overlap Threshold (%)', config.get('overlap_threshold', 'N/A')],
+                        ['Min Circularity', config.get('min_circularity', 'N/A')],
+                        ['Max Blob Distance', config.get('max_blob_distance', 'N/A')],
+                        ['Fluorescent Mode', config.get('fluorescent_mode', 'N/A')],
+                        ['Min Brightness Threshold', config.get('min_brightness_threshold', 'N/A')]
+                    ])
+                
+                df_config = pd.DataFrame(config_data, columns=['Parameter', 'Value'])
+                df_config.to_excel(writer, sheet_name='Configuration', index=False)
+                
+                # Format the Excel file
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    
+                    # Auto-adjust column widths
+                    for column in worksheet.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = min(max_length + 2, 50)
+                        worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            excel_buffer.seek(0)
+            
+            return send_file(
+                excel_buffer,
+                download_name=filename,
+                as_attachment=True,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            
+        except ImportError:
+            # Fallback to CSV if pandas/openpyxl not available
+            import csv
+            from io import StringIO
+            
+            csv_buffer = StringIO()
+            writer = csv.writer(csv_buffer)
+            
+            # Write summary based on mode
+            if mode in ['droplet', 'huge_droplet']:
+                writer.writerow(['Filename', 'Mask Count', 'Average Diameter (px)', 'Min Diameter (px)', 'Max Diameter (px)', 'Processing Time (s)'])
+                for result in batch_results:
+                    if result.get('success', False):
+                        writer.writerow([
+                            result.get('image_name', result.get('filename', 'Unknown')),
+                            result.get('mask_count', 0),
+                            result.get('average_diameter', 0),
+                            result.get('min_diameter', 0),
+                            result.get('max_diameter', 0),
+                            result.get('processing_time', 0)
+                        ])
+            elif mode == 'satellite_droplet':
+                writer.writerow(['Filename', 'Total Masks', 'Group 1 Count', 'Group 2 Count', 'Group 1 Avg Diameter', 'Group 2 Avg Diameter', 'Processing Time (s)'])
+                for result in batch_results:
+                    if result.get('success', False):
+                        writer.writerow([
+                            result.get('image_name', result.get('filename', 'Unknown')),
+                            result.get('mask_count', 0),
+                            result.get('group1_count', 0),
+                            result.get('group2_count', 0),
+                            result.get('group1_avg_diameter', 0),
+                            result.get('group2_avg_diameter', 0),
+                            result.get('processing_time', 0)
+                        ])
+            elif mode == 'multiple':
+                writer.writerow(['Filename', 'Total Large Masks', 'Total Overlaps', 'Overlap Percentage', 'Aggregate Masks', 'Simple Masks', 'Processing Time (s)'])
+                for result in batch_results:
+                    if result.get('success', False):
+                        writer.writerow([
+                            result.get('image_name', result.get('filename', 'Unknown')),
+                            result.get('total_large_masks', 0),
+                            result.get('total_overlaps_found', 0),
+                            result.get('overall_overlap_percentage', 0),
+                            result.get('aggregate_masks_count', 0),
+                            result.get('simple_masks_count', 0),
+                            result.get('processing_time', 0)
+                        ])
+            
+            csv_content = csv_buffer.getvalue().encode('utf-8')
+            csv_bytes = BytesIO(csv_content)
+            csv_filename = filename.replace('.xlsx', '.csv')
+            
+            return send_file(
+                csv_bytes,
+                download_name=csv_filename,
+                as_attachment=True,
+                mimetype='text/csv'
+            )
+            
+    except Exception as e:
+        print(f"Error in download_batch_excel: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/download_excel', methods=['POST'])
 def download_excel():
     """Generate and download Excel file with droplet diameter data for two groups."""
@@ -1566,20 +2122,33 @@ if __name__ == '__main__':
     print("  POST /analyze_droplets - Droplet mode analysis endpoint")
     print("  POST /analyze_huge_droplets - Huge droplet mode analysis endpoint")
     print("  POST /analyze_satellite_droplets - Satellite droplet mode analysis endpoint")
+    print("  POST /batch_process_files - Process multiple uploaded files in batch")
+    print("  POST /batch_process_base64 - Process multiple base64 images in batch") 
     print("  POST /download_excel - Download Excel file with diameter data")
+    print("  POST /download_batch_excel - Download Excel file with batch results")
     print("  GET  /defaults - Get default configuration and mode information")
     print("  GET  /model_info - Get model information for all modes")
     print("=" * 50)
-    print("🚀 TensorRT Support:")
-    print("  - Set SAM_BACKEND=tensorrt for ultra-fast inference")
-    print("  - Run convert_to_tensorrt.py to create TensorRT engines")
-    print("  - 3-5x faster than PyTorch!")
+    print("🚀 PyTorch SAM Backend:")
+    print(f"  - Model type: {MODEL_TYPE}")
+    print(f"  - GPU enabled: {USE_GPU}")
+    print(f"  - Device: {'cuda' if torch.cuda.is_available() and USE_GPU else 'cpu'}")
+    print(f"  - Points per side: 32")
+    print(f"  - Crop layers: 3 (high quality)")
     print("=" * 50)
     print("Modes:")
     print("  - droplet: Basic SAM (crop_n_layers=1) + 4 filters, shows mask count & diameter")
     print("  - huge_droplet: Enhanced SAM (crop_n_layers=3) + 4 filters, shows mask count & diameter")
     print("  - satellite_droplet: Enhanced SAM (crop_n_layers=3) + 4 filters + K-means clustering + two-group analysis & Excel export")
     print("  - multiple: Advanced SAM (crop_n_layers=3) + clustering, shows overlap analysis")
+    print("=" * 50)
+    print("🚀 Batch Processing Features:")
+    print("  - Upload and process multiple images simultaneously")
+    print("  - Supports all analysis modes (droplet, huge_droplet, satellite_droplet, multiple)")
+    print("  - Automatic aggregation of results across all images")
+    print("  - Excel export with comprehensive batch statistics")
+    print("  - Error handling for individual files (continues processing others)")
+    print("  - Processing time tracking per image and total batch")
     print("=" * 50)
     
     # Start Flask application
