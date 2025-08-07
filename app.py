@@ -1144,6 +1144,43 @@ def analyze_satellite_droplets():
         
         print(f"K-means clustering results: {len(larger_cluster)} larger masks, {len(smaller_cluster)} smaller masks")
         
+        # Apply mono-disperse droplet filter: Remove masks 30% larger than average diameter
+        if larger_cluster:
+            # Calculate diameters for larger cluster (mono-disperse droplets)
+            mono_disperse_diameters = []
+            for mask in larger_cluster:
+                area = mask['area']
+                diameter = 2 * np.sqrt(area / np.pi)
+                mask['diameter'] = diameter
+                mono_disperse_diameters.append(diameter)
+            
+            # Calculate average diameter for mono-disperse group
+            avg_mono_diameter = np.mean(mono_disperse_diameters)
+            diameter_threshold = avg_mono_diameter * 1.3  # 30% larger than average
+            
+            print(f"Mono-disperse filter - Average diameter: {avg_mono_diameter:.1f}px, Threshold: {diameter_threshold:.1f}px")
+            
+            # Filter out masks that are too large
+            filtered_larger_cluster = []
+            removed_large_count = 0
+            
+            for mask in larger_cluster:
+                if mask['diameter'] <= diameter_threshold:
+                    filtered_larger_cluster.append(mask)
+                else:
+                    removed_large_count += 1
+                    print(f"  Removed mono-disperse mask: diameter {mask['diameter']:.1f}px > threshold {diameter_threshold:.1f}px")
+            
+            larger_cluster = filtered_larger_cluster
+            print(f"Mono-disperse filter: Removed {removed_large_count} oversized masks, {len(larger_cluster)} remaining")
+        
+        # Also calculate diameters for smaller cluster (satellite droplets) for consistency
+        if smaller_cluster:
+            for mask in smaller_cluster:
+                area = mask['area']
+                diameter = 2 * np.sqrt(area / np.pi)
+                mask['diameter'] = diameter
+        
         processing_time = time.time() - start_time
         
         # Create satellite droplet visualization with two-group colors
@@ -1405,6 +1442,22 @@ def batch_process_files():
                         larger_cluster = clustered_masks[0] if clustered_masks[0] else clustered_masks[1]
                         smaller_cluster = clustered_masks[1] if clustered_masks[0] else clustered_masks[0]
                     
+                    # Apply mono-disperse droplet filter for batch processing
+                    if larger_cluster:
+                        # Calculate diameters for larger cluster (mono-disperse droplets)
+                        larger_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
+                        avg_mono_diameter = np.mean(larger_diameters)
+                        diameter_threshold = avg_mono_diameter * 1.3  # 30% larger than average
+                        
+                        # Filter out oversized masks
+                        filtered_larger_cluster = []
+                        for i, mask in enumerate(larger_cluster):
+                            diameter = larger_diameters[i]
+                            if diameter <= diameter_threshold:
+                                filtered_larger_cluster.append(mask)
+                        
+                        larger_cluster = filtered_larger_cluster
+                    
                     # Calculate group statistics
                     group1_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in smaller_cluster]
                     group2_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
@@ -1630,6 +1683,22 @@ def batch_process_base64():
                     else:
                         larger_cluster = clustered_masks[0] if clustered_masks[0] else clustered_masks[1]
                         smaller_cluster = clustered_masks[1] if clustered_masks[0] else clustered_masks[0]
+                    
+                    # Apply mono-disperse droplet filter for base64 batch processing  
+                    if larger_cluster:
+                        # Calculate diameters for larger cluster (mono-disperse droplets)
+                        larger_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
+                        avg_mono_diameter = np.mean(larger_diameters)
+                        diameter_threshold = avg_mono_diameter * 1.3  # 30% larger than average
+                        
+                        # Filter out oversized masks
+                        filtered_larger_cluster = []
+                        for i, mask in enumerate(larger_cluster):
+                            diameter = larger_diameters[i]
+                            if diameter <= diameter_threshold:
+                                filtered_larger_cluster.append(mask)
+                        
+                        larger_cluster = filtered_larger_cluster
                     
                     # Calculate group statistics
                     group1_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in smaller_cluster]
