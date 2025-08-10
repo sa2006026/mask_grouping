@@ -300,10 +300,7 @@
         }
 
         .result-image img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 10px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+            /* No size modifications - use pure natural dimensions */
         }
 
         .error-message {
@@ -457,36 +454,16 @@
         .interactive-satellite-container {
             position: relative;
             display: inline-block;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            /* Removed border-radius and overflow: hidden to prevent coordinate shifts */
         }
 
-        .satellite-display-image,
-        .satellite-hover-image {
-            display: block;
-            max-width: 100%;
-            height: auto;
+        .satellite-display-image {
+            /* No size modifications - use pure natural dimensions */
         }
         
-        .satellite-hover-image {
-            position: absolute;
-            top: 0;
-            left: 0;
-            pointer-events: none;
-            opacity: 0;
-            z-index: 0;
-        }
+        /* .satellite-hover-image removed - no longer used with embedded bounding boxes */
 
-        .satellite-hover-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 10;
-        }
+        /* .satellite-hover-overlay removed - no longer used with embedded bounding boxes */
 
         .satellite-tooltip {
             position: absolute;
@@ -546,6 +523,17 @@
         .tooltip-info-label {
             font-weight: bold;
             color: #ffd700;
+        }
+
+        .tooltip-action {
+            margin-top: 8px;
+            padding: 4px 8px;
+            background: rgba(255, 215, 0, 0.2);
+            border-radius: 4px;
+            font-size: 10px;
+            font-style: italic;
+            color: #ffd700;
+            text-align: center;
         }
 
         /* Batch processing styles */
@@ -692,9 +680,24 @@
             padding: 15px;
             border-bottom: 1px solid #f1f3f4;
             display: grid;
-            grid-template-columns: 1fr 2fr 1fr;
+            grid-template-columns: 200px 1fr 2fr 1fr;
             gap: 15px;
             align-items: center;
+        }
+
+        .batch-result-preview {
+            width: 180px;
+            height: 120px;
+            border-radius: 8px;
+            object-fit: cover;
+            border: 2px solid #e9ecef;
+            transition: transform 0.2s ease;
+        }
+
+        .batch-result-preview:hover {
+            transform: scale(1.1);
+            border-color: #667eea;
+            cursor: pointer;
         }
 
         .batch-result-item:last-child {
@@ -741,6 +744,83 @@
             opacity: 1;
         }
 
+        .satellite-mask-overlay {
+            position: absolute;
+            pointer-events: none;
+            z-index: 5;
+            transition: opacity 0.2s ease;
+        }
+
+        .satellite-mask-overlay.hidden {
+            opacity: 0.3;
+            border-style: dashed !important;
+        }
+
+        /* Generic interactive visualization styles */
+        .interactive-container {
+            position: relative;
+            display: inline-block;
+            /* No max-width constraint - use absolute image dimensions */
+        }
+
+        .display-image {
+            /* No size modifications - use pure natural dimensions */
+        }
+
+        /* .hover-overlay removed - no longer used with embedded bounding boxes */
+
+        .mask-highlight {
+            position: absolute;
+            border: 3px solid #ffd700;
+            background-color: rgba(255, 215, 0, 0.2);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            z-index: 10;
+        }
+
+        .interactive-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.4;
+            z-index: 15;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            min-width: 200px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .tooltip-mode-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 10px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .tooltip-droplet { background: #00ff00; color: #000; }
+        .tooltip-huge_droplet { background: #00ffff; color: #000; }
+        .tooltip-aggregate { background: #ff6600; color: #fff; }
+        .tooltip-simple { background: #00ff00; color: #000; }
+
+        .mask-overlay {
+            position: absolute;
+            pointer-events: none;
+            z-index: 5;
+            transition: opacity 0.2s ease;
+        }
+
+        .mask-overlay.hidden {
+            opacity: 0.3;
+            border-style: dashed !important;
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
@@ -766,6 +846,22 @@
                 font-size: 11px;
                 padding: 8px;
                 max-width: 150px;
+            }
+
+            .batch-result-item {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+
+            .batch-result-preview {
+                width: 100%;
+                max-width: 300px;
+                height: 200px;
+                margin: 0 auto;
+            }
+
+            .batch-result-stats {
+                grid-template-columns: repeat(2, 1fr);
             }
         }
     </style>
@@ -890,7 +986,7 @@
                 </div>
 
                 <button class="btn" id="downloadBtn" onclick="downloadResult()" style="display: none;">
-                    <i class="fas fa-download"></i> Download Result
+                    <i class="fas fa-download"></i> Download Interactive Result
                 </button>
                 <button class="btn" id="downloadExcelBtn" onclick="downloadExcel()" style="display: none;">
                     <i class="fas fa-file-excel"></i> Download Excel Data
@@ -960,6 +1056,8 @@
         let processingMode = 'single'; // 'single' or 'batch'
         let selectedFiles = [];
         let batchResult = null;
+        let activeMasks = []; // Track active/hidden masks for satellite mode
+        let currentStatistics = null; // Store current statistics for updates
 
         // File upload handling
         const uploadArea = document.getElementById('uploadArea');
@@ -1166,6 +1264,7 @@
 
                 if (result.success) {
                     batchResult = result;
+                    completeBatchProgress(); // Complete the progress animation
                     displayBatchResults(result);
                     showSuccess(`Batch processing completed! ${result.batch_summary.successful_files}/${result.batch_summary.total_files} files processed successfully.`);
                 } else {
@@ -1206,39 +1305,54 @@
                 </div>
             `).join('');
 
-            // Simulate progress updates
-            let completed = 0;
+            // Simulate progress updates - don't complete until actual response
             const interval = setInterval(() => {
-                // Update random files progress
+                // Update random files progress but never complete
                 for (let i = 0; i < selectedFiles.length; i++) {
                     const fillElement = document.getElementById(`progressFill${i}`);
                     const statusElement = document.getElementById(`status${i}`);
                     
                     if (statusElement.textContent === 'Processing...') {
                         let currentWidth = parseInt(fillElement.style.width) || 0;
-                        currentWidth += Math.random() * 15;
-                        
-                        if (currentWidth >= 100 && Math.random() > 0.7) {
-                            fillElement.style.width = '100%';
-                            statusElement.textContent = 'Completed';
-                            statusElement.className = 'batch-status completed';
-                            completed++;
-                            document.getElementById('batchProgressCompleted').textContent = completed;
-                        } else if (currentWidth < 100) {
-                            fillElement.style.width = Math.min(currentWidth, 95) + '%';
+                        // Slow down progress as it approaches completion, never reach 100%
+                        if (currentWidth < 70) {
+                            currentWidth += Math.random() * 10;
+                        } else if (currentWidth < 85) {
+                            currentWidth += Math.random() * 3;
+                        } else {
+                            currentWidth += Math.random() * 1;
                         }
+                        
+                        // Cap at 90% to prevent false completion
+                        fillElement.style.width = Math.min(currentWidth, 90) + '%';
                     }
                 }
-
-                if (completed >= selectedFiles.length * 0.8) {
-                    clearInterval(interval);
-                }
-            }, 1000);
+            }, 1500);
 
             window.batchProgressInterval = interval;
         }
 
         function hideBatchProgress() {
+            if (window.batchProgressInterval) {
+                clearInterval(window.batchProgressInterval);
+            }
+        }
+
+        function completeBatchProgress() {
+            // Complete all progress bars and mark as completed
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const fillElement = document.getElementById(`progressFill${i}`);
+                const statusElement = document.getElementById(`status${i}`);
+                
+                if (fillElement && statusElement) {
+                    fillElement.style.width = '100%';
+                    statusElement.textContent = 'Completed';
+                    statusElement.className = 'batch-status completed';
+                }
+            }
+            document.getElementById('batchProgressCompleted').textContent = selectedFiles.length;
+            
+            // Clear the interval
             if (window.batchProgressInterval) {
                 clearInterval(window.batchProgressInterval);
             }
@@ -1340,6 +1454,7 @@
                 if (!result.success) {
                     return `
                         <div class="batch-result-item">
+                            <div class="batch-result-preview" style="background: #f8d7da; display: flex; align-items: center; justify-content: center; color: #721c24;">Failed</div>
                             <div class="batch-result-filename">${result.filename}</div>
                             <div style="color: #dc3545;">❌ Failed: ${result.error}</div>
                             <div class="batch-status failed">Failed</div>
@@ -1367,15 +1482,27 @@
                     statsHtml = `
                         <div class="batch-result-stat">
                             <div class="batch-result-stat-value">${result.group1_count}</div>
-                            <div class="batch-result-stat-label">Group 1</div>
+                            <div class="batch-result-stat-label">Group 1 Count</div>
                         </div>
                         <div class="batch-result-stat">
                             <div class="batch-result-stat-value">${result.group2_count}</div>
-                            <div class="batch-result-stat-label">Group 2</div>
+                            <div class="batch-result-stat-label">Group 2 Count</div>
                         </div>
                         <div class="batch-result-stat">
-                            <div class="batch-result-stat-value">${result.processing_time.toFixed(1)}s</div>
-                            <div class="batch-result-stat-label">Time</div>
+                            <div class="batch-result-stat-value">${result.group1_percentage ? result.group1_percentage.toFixed(1) : 0}%</div>
+                            <div class="batch-result-stat-label">Group 1 %</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.group2_percentage ? result.group2_percentage.toFixed(1) : 0}%</div>
+                            <div class="batch-result-stat-label">Group 2 %</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.group1_avg_diameter ? result.group1_avg_diameter.toFixed(1) : 0}px</div>
+                            <div class="batch-result-stat-label">Group 1 Avg</div>
+                        </div>
+                        <div class="batch-result-stat">
+                            <div class="batch-result-stat-value">${result.group2_avg_diameter ? result.group2_avg_diameter.toFixed(1) : 0}px</div>
+                            <div class="batch-result-stat-label">Group 2 Avg</div>
                         </div>
                     `;
                 } else if (currentMode === 'multiple') {
@@ -1399,8 +1526,14 @@
                     `;
                 }
 
+                // Generate preview image element
+                const previewImageHtml = result.preview_image 
+                    ? `<img src="${result.preview_image}" alt="Preview for ${result.filename}" class="batch-result-preview" onclick="showImageModal('${result.preview_image}', '${result.filename}')">` 
+                    : `<div class="batch-result-preview" style="background: #f8f9fa; display: flex; align-items: center; justify-content: center; color: #6c757d;">No Preview</div>`;
+
                 return `
                     <div class="batch-result-item">
+                        ${previewImageHtml}
                         <div class="batch-result-filename">${result.filename}</div>
                         <div class="batch-result-stats">${statsHtml}</div>
                         <div class="batch-status completed">✅ Completed</div>
@@ -1593,10 +1726,20 @@
                 // Display overlap analysis results
                 const results = result.results;
                 
-                // Display result image
-                document.getElementById('resultImage').innerHTML = `
-                    <img src="${results.overlap_analysis_image}" alt="Overlap Analysis" style="max-width: 100%; height: auto; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                // Display result image with interactive features
+                if (result.mask_data_for_frontend) {
+                    setupInteractiveVisualization(
+                        results.overlap_analysis_image, 
+                        results.original_image_for_hover, 
+                        result.mask_data_for_frontend,
+                        'multiple'
+                    );
+                } else {
+                    // Fallback to simple image if mask data is not available
+                    document.getElementById('resultImage').innerHTML = `
+                                            <img src="${results.overlap_analysis_image}" alt="Overlap Analysis">
                 `;
+                }
                 
                 // Display basic statistics
                 const statsGrid = document.getElementById('statsGrid');
@@ -1735,10 +1878,20 @@
                     </div>
                 `;
 
-                // Display droplet result image
-                document.getElementById('resultImage').innerHTML = `
-                    <img src="${result.results.droplet_analysis_image}" alt="Droplet Analysis" style="max-width: 100%; height: auto; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                // Display droplet result image with interactive features
+                if (result.mask_data_for_frontend) {
+                    setupInteractiveVisualization(
+                        result.results.droplet_analysis_image, 
+                        result.results.original_image_for_hover, 
+                        result.mask_data_for_frontend,
+                        'droplet'
+                    );
+                } else {
+                    // Fallback to simple image if mask data is not available
+                    document.getElementById('resultImage').innerHTML = `
+                                            <img src="${result.results.droplet_analysis_image}" alt="Droplet Analysis">
                 `;
+                }
 
                 // Display detailed droplet statistics
                 const statsSection = document.getElementById('statsSection');
@@ -1823,10 +1976,20 @@
                     </div>
                 `;
 
-                // Display huge droplet result image
-                document.getElementById('resultImage').innerHTML = `
-                    <img src="${result.results.huge_droplet_analysis_image}" alt="Huge Droplet Analysis" style="max-width: 100%; height: auto; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                // Display huge droplet result image with interactive features
+                if (result.mask_data_for_frontend) {
+                    setupInteractiveVisualization(
+                        result.results.huge_droplet_analysis_image, 
+                        result.results.original_image_for_hover, 
+                        result.mask_data_for_frontend,
+                        'huge_droplet'
+                    );
+                } else {
+                    // Fallback to simple image if mask data is not available
+                    document.getElementById('resultImage').innerHTML = `
+                                            <img src="${result.results.huge_droplet_analysis_image}" alt="Huge Droplet Analysis">
                 `;
+                }
 
                 // Display detailed huge droplet statistics
                 const statsSection = document.getElementById('statsSection');
@@ -1937,11 +2100,35 @@
                     result.results.original_image_for_hover, 
                     result.mask_data_for_frontend
                 );
+                
+                    // Add control panel for mask management
+                    const controlPanel = document.createElement('div');
+                    controlPanel.id = 'satelliteControlPanel';
+                    controlPanel.style.cssText = `
+                        background: #f8f9fa;
+                        border: 1px solid #e9ecef;
+                        border-radius: 8px;
+                        padding: 15px;
+                        margin-top: 15px;
+                        text-align: center;
+                    `;
+                    controlPanel.innerHTML = `
+                        <h4>Interactive Controls</h4>
+                        <p><strong>Hover:</strong> View mask details | <strong>Click:</strong> Toggle mask visibility</p>
+                        <div id="maskStatus" style="margin-top: 10px;">
+                            <span id="visibleCount">0</span> visible, <span id="hiddenCount">0</span> hidden
+                            <button onclick="resetAllMasks()" style="margin-left: 15px; padding: 5px 10px; border-radius: 4px; border: 1px solid #667eea; background: #667eea; color: white; cursor: pointer;">Reset All</button>
+                        </div>
+                        <div id="updateStatus" style="margin-top: 5px; font-size: 11px; color: #28a745; display: none;">
+                            ✓ Analysis results updated
+                        </div>
+                    `;
+                    document.getElementById('resultImage').appendChild(controlPanel);
                 } else {
                     // Fallback to simple image if mask data is not available
                     document.getElementById('resultImage').innerHTML = `
-                        <img src="${result.results.satellite_droplet_analysis_image}" alt="Satellite Droplet Analysis" style="max-width: 100%; height: auto; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-                    `;
+                                            <img src="${result.results.satellite_droplet_analysis_image}" alt="Satellite Droplet Analysis">
+                `;
                 }
 
                 // Display detailed satellite droplet statistics with two groups
@@ -2058,29 +2245,142 @@
         }
 
         function downloadResult() {
-            if (analysisResult) {
-                const link = document.createElement('a');
-                
-                if (currentMode === 'droplet' && analysisResult.results.droplet_analysis_image) {
-                    link.href = analysisResult.results.droplet_analysis_image;
-                    link.download = `droplet_analysis_${Date.now()}.png`;
-                } else if (currentMode === 'huge_droplet' && analysisResult.results.huge_droplet_analysis_image) {
-                    link.href = analysisResult.results.huge_droplet_analysis_image;
-                    link.download = `huge_droplet_analysis_${Date.now()}.png`;
-                } else if (currentMode === 'multiple' && analysisResult.results.overlap_analysis_image) {
-                    link.href = analysisResult.results.overlap_analysis_image;
-                    link.download = `overlap_analysis_${Date.now()}.png`;
-                } else if (currentMode === 'satellite_droplet' && analysisResult.results.satellite_droplet_analysis_image) {
-                    link.href = analysisResult.results.satellite_droplet_analysis_image;
-                    link.download = `satellite_droplet_analysis_${Date.now()}.png`;
-                } else {
-                    return;
-                }
-                
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+            if (!analysisResult) return;
+            
+            // Check if we have interactive masks with visibility states
+            if (activeMasks && activeMasks.length > 0) {
+                // Use custom generation for interactive results
+                downloadCustomResult();
+            } else {
+                // Fallback to original behavior for non-interactive results
+                downloadOriginalResult();
             }
+        }
+
+        function downloadCustomResult() {
+            if (!analysisResult || !activeMasks) {
+                showError('No interactive mask data available');
+                return;
+            }
+
+            console.log('Generating custom result with', activeMasks.filter(m => !m.hidden).length, 'visible masks out of', activeMasks.length, 'total masks');
+
+            // Prepare visible masks data for backend based on mode
+            const visibleMasks = activeMasks
+                .filter(mask => !mask.hidden)
+                .map(mask => {
+                    let maskData = {
+                        bbox: mask.bbox,
+                        area: mask.area
+                    };
+                    
+                    // Add mode-specific properties
+                    if (currentMode === 'satellite_droplet') {
+                        maskData.group = mask.group; // 1 or 2
+                    } else if (currentMode === 'multiple') {
+                        maskData.is_aggregate = mask.is_aggregate || false;
+                        maskData.overlap_count = mask.overlap_count || 0;
+                    }
+                    // For droplet and huge_droplet modes, just bbox and area are sufficient
+                    
+                    return maskData;
+                });
+
+            // Get original image data - try different sources based on mode
+            let originalImageData = null;
+            if (currentMode === 'multiple' && analysisResult.results.original_image_for_hover) {
+                originalImageData = analysisResult.results.original_image_for_hover;
+            } else if (currentMode === 'satellite_droplet' && analysisResult.results.original_image_for_hover) {
+                originalImageData = analysisResult.results.original_image_for_hover;
+            } else if (currentMode === 'droplet' && analysisResult.results.original_image_for_hover) {
+                originalImageData = analysisResult.results.original_image_for_hover;
+            } else if (currentMode === 'huge_droplet' && analysisResult.results.original_image_for_hover) {
+                originalImageData = analysisResult.results.original_image_for_hover;
+            }
+
+            if (!originalImageData) {
+                showError('Original image data not available for custom generation');
+                downloadOriginalResult(); // Fallback
+                return;
+            }
+
+            const requestData = {
+                original_image: originalImageData,
+                visible_masks: visibleMasks,
+                mode: currentMode
+            };
+
+            // Show loading state
+            const downloadBtn = document.getElementById('downloadBtn');
+            const originalText = downloadBtn.innerHTML;
+            downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+            downloadBtn.disabled = true;
+
+            fetch('/generate_custom_result', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to generate custom result');
+                }
+                return response.json();
+            })
+            .then(result => {
+                if (result.success) {
+                    // Download the generated file
+                    const link = document.createElement('a');
+                    link.href = result.download_url;
+                    link.download = result.filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    showSuccess(`Custom result downloaded with ${result.visible_mask_count} visible masks!`);
+                } else {
+                    throw new Error(result.error || 'Failed to generate custom result');
+                }
+            })
+            .catch(error => {
+                console.error('Error generating custom result:', error);
+                showError('Failed to generate custom result: ' + error.message);
+                // Fallback to original download
+                downloadOriginalResult();
+            })
+            .finally(() => {
+                // Restore button state
+                downloadBtn.innerHTML = originalText;
+                downloadBtn.disabled = false;
+            });
+        }
+
+        function downloadOriginalResult() {
+            if (!analysisResult) return;
+            
+            const link = document.createElement('a');
+            
+            if (currentMode === 'droplet' && analysisResult.results.droplet_analysis_image) {
+                link.href = analysisResult.results.droplet_analysis_image;
+                link.download = `droplet_analysis_${Date.now()}.png`;
+            } else if (currentMode === 'huge_droplet' && analysisResult.results.huge_droplet_analysis_image) {
+                link.href = analysisResult.results.huge_droplet_analysis_image;
+                link.download = `huge_droplet_analysis_${Date.now()}.png`;
+            } else if (currentMode === 'multiple' && analysisResult.results.overlap_analysis_image) {
+                link.href = analysisResult.results.overlap_analysis_image;
+                link.download = `overlap_analysis_${Date.now()}.png`;
+            } else if (currentMode === 'satellite_droplet' && analysisResult.results.satellite_droplet_analysis_image) {
+                link.href = analysisResult.results.satellite_droplet_analysis_image;
+                link.download = `satellite_droplet_analysis_${Date.now()}.png`;
+            } else {
+                return;
+            }
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
         function downloadExcel() {
@@ -2217,6 +2517,15 @@
         }
 
         // Interactive satellite visualization functionality
+        // Setup interactive visualization for any mode
+        function setupInteractiveVisualization(visualizationImageUrl, originalImageUrl, maskData, mode) {
+            if (mode === 'satellite_droplet') {
+                return setupInteractiveSatelliteVisualization(visualizationImageUrl, originalImageUrl, maskData);
+            } else {
+                return setupInteractiveGenericVisualization(visualizationImageUrl, originalImageUrl, maskData, mode);
+            }
+        }
+
         function setupInteractiveSatelliteVisualization(visualizationImageUrl, originalImageUrl, maskData) {
             const resultContainer = document.getElementById('resultImage');
             
@@ -2225,9 +2534,12 @@
             
             // Combine masks from both groups with group information
             const allMasks = [
-                ...maskData.group1_masks.map(mask => ({...mask, group: 1})),
-                ...maskData.group2_masks.map(mask => ({...mask, group: 2}))
+                ...maskData.group1_masks.map(mask => ({...mask, group: 1, hidden: false, diameter: Math.sqrt(mask.area * 4 / Math.PI)})),
+                ...maskData.group2_masks.map(mask => ({...mask, group: 2, hidden: false, diameter: Math.sqrt(mask.area * 4 / Math.PI)}))
             ];
+            
+            // Initialize global activeMasks for toggle functionality
+            activeMasks = allMasks;
             
             console.log(`Total masks for hover detection: ${allMasks.length}`);
             if (allMasks.length > 0) {
@@ -2237,66 +2549,62 @@
             resultContainer.innerHTML = `
                 <div class="interactive-satellite-container" id="satelliteContainer">
                     <img src="${visualizationImageUrl}" alt="Satellite Droplet Analysis" class="satellite-display-image" id="satelliteDisplayImage">
-                    <img src="${originalImageUrl}" alt="Original Image for Hover Detection" class="satellite-hover-image" id="satelliteHoverImage" style="display: none;">
-                    <div class="satellite-hover-overlay" id="satelliteOverlay"></div>
                     <div class="satellite-mask-highlight" id="satelliteMaskHighlight"></div>
                     <div class="satellite-tooltip" id="satelliteTooltip">
                         <div class="tooltip-group-badge" id="tooltipGroupBadge"></div>
                         <div class="tooltip-info-line"><span class="tooltip-info-label">Diameter:</span> <span id="tooltipDiameter"></span></div>
                         <div class="tooltip-info-line"><span class="tooltip-info-label">Area:</span> <span id="tooltipArea"></span></div>
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Width:</span> <span id="tooltipWidth"></span></div>
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Height:</span> <span id="tooltipHeight"></span></div>
                         <div class="tooltip-info-line"><span class="tooltip-info-label">Position:</span> <span id="tooltipPosition"></span></div>
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Status:</span> <span id="tooltipStatus">Active</span></div>
+                        <div class="tooltip-action">Click to toggle visibility</div>
                     </div>
                 </div>
             `;
             
             const container = document.getElementById('satelliteContainer');
             const displayImage = document.getElementById('satelliteDisplayImage');
-            const hoverImage = document.getElementById('satelliteHoverImage');
-            const overlay = document.getElementById('satelliteOverlay');
             const tooltip = document.getElementById('satelliteTooltip');
             const highlight = document.getElementById('satelliteMaskHighlight');
             
-            let imagesLoaded = 0;
-            
-            function checkImagesLoaded() {
-                imagesLoaded++;
-                if (imagesLoaded >= 2) {
-                    // Both images are loaded
+            function checkImageLoaded() {
+                if (displayImage.complete) {
+                    // Image loaded with embedded bounding boxes
                     setTimeout(() => {
-                                    console.log(`Images loaded - Display: ${displayImage.naturalWidth}x${displayImage.naturalHeight}, Hover: ${hoverImage.naturalWidth}x${hoverImage.naturalHeight}`);
-            console.log(`Container displayed size: ${displayImage.offsetWidth}x${displayImage.offsetHeight}`);
-            
-            // Log first few mask bounding boxes for verification
-            console.log('First 3 mask bounding boxes:');
-            for (let i = 0; i < Math.min(3, allMasks.length); i++) {
-                const mask = allMasks[i];
-                console.log(`  Mask ${i}: Group ${mask.group}, bbox[${mask.bbox[0]}, ${mask.bbox[1]}, ${mask.bbox[2]}, ${mask.bbox[3]}], area: ${mask.area}`);
-            }
-                        setupSatelliteHoverEvents(container, displayImage, hoverImage, allMasks, tooltip, highlight);
+                        // Let image use natural dimensions - no explicit sizing
+                        const naturalWidth = displayImage.naturalWidth;
+                        const naturalHeight = displayImage.naturalHeight;
                         
-                        // DEBUG: Temporarily show all bounding boxes as overlays
-                        if (allMasks.length > 0) {
-                            showAllBoundingBoxes(container, allMasks, displayImage, hoverImage);
+                        console.log(`Using natural dimensions: ${naturalWidth}x${naturalHeight}px`);
+                        console.log(`Image loaded with embedded bounding boxes: ${displayImage.naturalWidth}x${displayImage.naturalHeight}`);
+                        console.log(`Container displayed size: ${displayImage.offsetWidth}x${displayImage.offsetHeight}`);
+                        
+                        // Log first few mask bounding boxes for verification
+                        console.log('First 3 mask bounding boxes:');
+                        for (let i = 0; i < Math.min(3, allMasks.length); i++) {
+                            const mask = allMasks[i];
+                            console.log(`  Mask ${i}: Group ${mask.group}, bbox[${mask.bbox[0]}, ${mask.bbox[1]}, ${mask.bbox[2]}, ${mask.bbox[3]}], area: ${mask.area}`);
                         }
+                        setupSatelliteHoverEvents(container, displayImage, allMasks, tooltip, highlight);
+                        
+                        // No separate overlay drawing needed - bounding boxes are embedded in image
+                        console.log('Using embedded bounding boxes from visualization image');
+                        // Initialize mask count display
+                        setTimeout(() => updateMaskCountDisplay(), 200);
                     }, 100);
                 }
             }
             
-            displayImage.onload = checkImagesLoaded;
-            hoverImage.onload = checkImagesLoaded;
+            displayImage.onload = checkImageLoaded;
             
-            // If images are already loaded (cached)
-            if (displayImage.complete && hoverImage.complete) {
-                setTimeout(checkImagesLoaded, 50);
-            } else if (displayImage.complete) {
-                imagesLoaded = 1;
-                if (hoverImage.complete) checkImagesLoaded();
-                         } else if (hoverImage.complete) {
-                imagesLoaded = 1;
+            // If image is already loaded (cached)
+            if (displayImage.complete) {
+                setTimeout(checkImageLoaded, 50);
             }
         }
 
-        function setupSatelliteHoverEvents(container, displayImage, hoverImage, masks, tooltip, highlight) {
+        function setupSatelliteHoverEvents(container, displayImage, masks, tooltip, highlight) {
             let throttleTimeout = null;
             
             container.addEventListener('mousemove', function(e) {
@@ -2306,20 +2614,22 @@
                 
                 const rect = displayImage.getBoundingClientRect();
                 
-                // Calculate scale factors between displayed image and original image (for hover detection)
-                const scaleX = hoverImage.naturalWidth / rect.width;
-                const scaleY = hoverImage.naturalHeight / rect.height;
+                // Use direct mouse coordinates relative to image - no transformations
+                const imageX = e.clientX - rect.left;
+                const imageY = e.clientY - rect.top;
                 
-                // Convert mouse coordinates to original image coordinates
-                const mouseX = e.clientX - rect.left;
-                const mouseY = e.clientY - rect.top;
-                const imageX = mouseX * scaleX;
-                const imageY = mouseY * scaleY;
+                // Debug coordinate system
+                if (Math.random() < 0.1) { // Occasional debugging
+                    console.log(`DEBUG COORDS: Mouse(${e.clientX}, ${e.clientY}) Rect(${rect.left}, ${rect.top}) -> Image(${imageX}, ${imageY})`);
+                    console.log(`DEBUG RECT: left=${rect.left}, top=${rect.top}, width=${rect.width}, height=${rect.height}`);
+                    console.log(`DEBUG IMAGE: naturalWidth=${displayImage.naturalWidth}, naturalHeight=${displayImage.naturalHeight}`);
+                    console.log(`DEBUG IMAGE: offsetWidth=${displayImage.offsetWidth}, offsetHeight=${displayImage.offsetHeight}`);
+                }
                 
                 // Debug logging for first few mousemove events
                 if (Math.random() < 0.01) { // Very occasional logging
-                    console.log(`COORD DEBUG: Display(${rect.width.toFixed(1)}x${rect.height.toFixed(1)}) -> Original(${hoverImage.naturalWidth}x${hoverImage.naturalHeight})`);
-                    console.log(`COORD DEBUG: Mouse(${mouseX.toFixed(1)}, ${mouseY.toFixed(1)}) -> Image(${imageX.toFixed(1)}, ${imageY.toFixed(1)}) Scale(${scaleX.toFixed(3)}, ${scaleY.toFixed(3)})`);
+                    console.log(`COORD DEBUG: Display(${rect.width.toFixed(1)}x${rect.height.toFixed(1)}) -> ProcessedImage(${displayImage.naturalWidth}x${displayImage.naturalHeight})`);
+                    console.log(`COORD DEBUG: Mouse -> Image coords (${imageX.toFixed(1)}, ${imageY.toFixed(1)}) - Direct 1:1 mapping`);
                 }
                 
                 // Find the smallest mask that contains this point
@@ -2339,11 +2649,19 @@
                         matchCount++;
                         // Debug: log when we find a matching mask
                         console.log(`MATCH ${matchCount}! Group ${mask.group} bbox: [${bx}, ${by}, ${bw}, ${bh}] at image coords (${imageX.toFixed(1)}, ${imageY.toFixed(1)}) area: ${mask.area}`);
+                        console.log(`  BBOX RANGE: X: ${bx} to ${bx + bw}, Y: ${by} to ${by + bh}`);
                         
                         // This mask contains the point and is smaller than current best
                         if (mask.area < smallestArea) {
                             hoveredMask = mask;
                             smallestArea = mask.area;
+                        }
+                    } else {
+                        // Debug: log why mask didn't match (occasionally)
+                        if (Math.random() < 0.01) {
+                            console.log(`NO MATCH: Group ${mask.group} bbox: [${bx}, ${by}, ${bw}, ${bh}] vs coords (${imageX.toFixed(1)}, ${imageY.toFixed(1)})`);
+                            console.log(`  X check: ${imageX} >= ${bx} && ${imageX} <= ${bx + bw} = ${imageX >= bx && imageX <= (bx + bw)}`);
+                            console.log(`  Y check: ${imageY} >= ${by} && ${imageY} <= ${by + bh} = ${imageY >= by && imageY <= (by + bh)}`);
                         }
                     }
                 }
@@ -2354,7 +2672,7 @@
                 }
                 
                 if (hoveredMask) {
-                    showSatelliteTooltip(e, hoveredMask, tooltip, highlight, rect, scaleX, scaleY);
+                    showSatelliteTooltip(e, hoveredMask, tooltip, highlight, rect);
                 } else {
                     hideSatelliteTooltip(tooltip, highlight);
                 }
@@ -2364,51 +2682,55 @@
                 hideSatelliteTooltip(tooltip, highlight);
             });
             
-            // Add click event for debugging
+            // Add click event for mask toggling
             container.addEventListener('click', function(e) {
                 const rect = displayImage.getBoundingClientRect();
-                const scaleX = hoverImage.naturalWidth / rect.width;
-                const scaleY = hoverImage.naturalHeight / rect.height;
-                const mouseX = e.clientX - rect.left;
-                const mouseY = e.clientY - rect.top;
-                const imageX = mouseX * scaleX;
-                const imageY = mouseY * scaleY;
+                // Use direct mouse coordinates relative to image - no transformations
+                const imageX = e.clientX - rect.left;
+                const imageY = e.clientY - rect.top;
                 
-                console.log(`CLICK DEBUG: Mouse(${mouseX.toFixed(1)}, ${mouseY.toFixed(1)}) -> Image(${imageX.toFixed(1)}, ${imageY.toFixed(1)}), Scale(${scaleX.toFixed(2)}, ${scaleY.toFixed(2)})`);
-                console.log(`Image dimensions - Display: ${displayImage.naturalWidth}x${displayImage.naturalHeight}, Hover: ${hoverImage.naturalWidth}x${hoverImage.naturalHeight}, Displayed: ${rect.width.toFixed(1)}x${rect.height.toFixed(1)}`);
+                // Find the clicked mask
+                let clickedMask = null;
+                let smallestArea = Infinity;
                 
-                // Test first few masks
-                for (let i = 0; i < Math.min(3, masks.length); i++) {
-                    const mask = masks[i];
+                for (let mask of masks) {
                     const [bx, by, bw, bh] = mask.bbox;
                     const isInside = (imageX >= bx && imageX <= (bx + bw) && imageY >= by && imageY <= (by + bh));
-                    console.log(`  Mask ${i}: Group ${mask.group}, bbox[${bx}, ${by}, ${bw}, ${bh}] -> ${isInside ? 'INSIDE' : 'outside'}`);
                     
-                    // Also show what the highlight position would be for this mask
-                    const highlightLeft = (bx / scaleX);
-                    const highlightTop = (by / scaleY);
-                    const highlightWidth = (bw / scaleX);
-                    const highlightHeight = (bh / scaleY);
-                    console.log(`    -> Highlight would be at: [${highlightLeft.toFixed(1)}, ${highlightTop.toFixed(1)}, ${highlightWidth.toFixed(1)}, ${highlightHeight.toFixed(1)}]`);
+                    if (isInside && mask.area < smallestArea) {
+                        clickedMask = mask;
+                        smallestArea = mask.area;
+                    }
+                }
+                
+                if (clickedMask) {
+                    toggleMask(clickedMask);
                 }
             });
         }
 
-        function showSatelliteTooltip(mouseEvent, mask, tooltip, highlight, imageRect, scaleX, scaleY) {
+        function showSatelliteTooltip(mouseEvent, mask, tooltip, highlight, imageRect) {
             const [bx, by, bw, bh] = mask.bbox;
             
             // Update tooltip content
             const groupBadge = document.getElementById('tooltipGroupBadge');
             const tooltipDiameter = document.getElementById('tooltipDiameter');
             const tooltipArea = document.getElementById('tooltipArea');
+            const tooltipWidth = document.getElementById('tooltipWidth');
+            const tooltipHeight = document.getElementById('tooltipHeight');
             const tooltipPosition = document.getElementById('tooltipPosition');
+            const tooltipStatus = document.getElementById('tooltipStatus');
             
             groupBadge.textContent = `Group ${mask.group}`;
             groupBadge.className = `tooltip-group-badge tooltip-group-${mask.group}`;
             
             tooltipDiameter.textContent = `${mask.diameter.toFixed(1)}px`;
             tooltipArea.textContent = `${mask.area.toLocaleString()}px²`;
+            tooltipWidth.textContent = `${Math.round(bw)}px`;
+            tooltipHeight.textContent = `${Math.round(bh)}px`;
             tooltipPosition.textContent = `(${Math.round(bx + bw/2)}, ${Math.round(by + bh/2)})`;
+            tooltipStatus.textContent = mask.hidden ? 'Hidden' : 'Active';
+            tooltipStatus.style.color = mask.hidden ? '#ff6b6b' : '#4ecdc4';
             
             // Position tooltip near mouse with boundary checking
             const containerRect = document.getElementById('satelliteContainer').getBoundingClientRect();
@@ -2428,13 +2750,13 @@
             tooltip.style.top = tooltipY + 'px';
             tooltip.classList.add('visible');
             
-            // Position and show highlight box - convert from image coords to display coords
-            const highlightLeft = (bx / scaleX);
-            const highlightTop = (by / scaleY);
-            const highlightWidth = (bw / scaleX);
-            const highlightHeight = (bh / scaleY);
+            // Position and show highlight box - use bbox coordinates directly (no scaling)
+            const highlightLeft = bx;
+            const highlightTop = by;
+            const highlightWidth = bw;
+            const highlightHeight = bh;
             
-            console.log(`HIGHLIGHT DEBUG: bbox[${bx}, ${by}, ${bw}, ${bh}] -> display[${highlightLeft.toFixed(1)}, ${highlightTop.toFixed(1)}, ${highlightWidth.toFixed(1)}, ${highlightHeight.toFixed(1)}] scale[${scaleX.toFixed(2)}, ${scaleY.toFixed(2)}]`);
+            console.log(`HIGHLIGHT DEBUG: bbox[${bx}, ${by}, ${bw}, ${bh}] -> display[${highlightLeft}, ${highlightTop}, ${highlightWidth}, ${highlightHeight}] (1:1 mapping)`);
             
             highlight.style.left = highlightLeft + 'px';
             highlight.style.top = highlightTop + 'px';
@@ -2452,8 +2774,7 @@
             console.log('DEBUG: Showing all bounding boxes for visual verification...');
             
             const rect = displayImage.getBoundingClientRect();
-            const scaleX = hoverImage.naturalWidth / rect.width;
-            const scaleY = hoverImage.naturalHeight / rect.height;
+            // No scaling - use bbox coordinates directly
             
             // Remove any existing debug boxes
             const existingBoxes = container.querySelectorAll('.debug-bbox');
@@ -2465,11 +2786,11 @@
                 const mask = masks[i];
                 const [bx, by, bw, bh] = mask.bbox;
                 
-                // Convert from image coords to display coords
-                const displayLeft = (bx / scaleX);
-                const displayTop = (by / scaleY);
-                const displayWidth = (bw / scaleX);
-                const displayHeight = (bh / scaleY);
+                // Use bbox coordinates directly (1:1 mapping)
+                const displayLeft = bx;
+                const displayTop = by;
+                const displayWidth = bw;
+                const displayHeight = bh;
                 
                 const debugBox = document.createElement('div');
                 debugBox.className = 'debug-bbox';
@@ -2500,6 +2821,649 @@
             }, 10000);
         }
 
+        // Toggle mask visibility function
+        function toggleMask(mask) {
+            mask.hidden = !mask.hidden;
+            console.log(`Toggled mask: Group ${mask.group}, Area: ${mask.area}, Hidden: ${mask.hidden}`);
+            
+            // Update visualization based on current mode
+            if (currentMode === 'satellite_droplet') {
+                updateSatelliteVisualization();
+                updateSatelliteStatistics();
+            } else {
+                updateGenericVisualization();
+                updateGenericStatistics();
+            }
+            
+            // Show update confirmation
+            showUpdateStatus();
+        }
+
+        // Update satellite visualization after mask toggle
+        function updateSatelliteVisualization() {
+            const highlights = document.querySelectorAll('.satellite-mask-overlay');
+            highlights.forEach(h => h.remove());
+            
+            // NOTE: Visual updates now handled by regenerating the image with new mask visibility
+            // Bounding boxes are embedded in the image, so no overlay redrawing needed
+            console.log('Mask visibility updated - using embedded bounding boxes');
+        }
+
+        // NOTE: Overlay drawing removed - bounding boxes are now embedded in the visualization image
+        // This ensures perfect alignment since bounding boxes are part of the actual image pixels
+
+        // Update statistics in real-time
+        function updateSatelliteStatistics() {
+            if (!activeMasks) return;
+            
+            // Separate visible masks by group
+            const visibleMasks = activeMasks.filter(m => !m.hidden);
+            const group1Visible = visibleMasks.filter(m => m.group === 1);
+            const group2Visible = visibleMasks.filter(m => m.group === 2);
+            
+            // Calculate new statistics
+            const totalVisible = visibleMasks.length;
+            const group1Count = group1Visible.length;
+            const group2Count = group2Visible.length;
+            const group1Percentage = totalVisible > 0 ? (group1Count / totalVisible * 100) : 0;
+            const group2Percentage = totalVisible > 0 ? (group2Count / totalVisible * 100) : 0;
+            
+            // Calculate comprehensive diameter statistics
+            const group1Diameters = group1Visible.map(m => m.diameter);
+            const group2Diameters = group2Visible.map(m => m.diameter);
+            const allDiameters = visibleMasks.map(m => m.diameter);
+            const allAreas = visibleMasks.map(m => m.area);
+            
+            const group1AvgDiameter = group1Diameters.length > 0 ? 
+                group1Diameters.reduce((sum, d) => sum + d, 0) / group1Diameters.length : 0;
+            const group2AvgDiameter = group2Diameters.length > 0 ? 
+                group2Diameters.reduce((sum, d) => sum + d, 0) / group2Diameters.length : 0;
+            const overallAvgDiameter = allDiameters.length > 0 ? 
+                allDiameters.reduce((sum, d) => sum + d, 0) / allDiameters.length : 0;
+            
+            // Calculate additional statistics
+            const totalArea = allAreas.reduce((sum, a) => sum + a, 0);
+            const avgArea = allAreas.length > 0 ? totalArea / allAreas.length : 0;
+            const diameterStd = allDiameters.length > 1 ? calculateStandardDeviation(allDiameters) : 0;
+            const minDiameter = allDiameters.length > 0 ? Math.min(...allDiameters) : 0;
+            const maxDiameter = allDiameters.length > 0 ? Math.max(...allDiameters) : 0;
+            
+            // Update all statistics cards
+            updateStatCard('Final Droplets', totalVisible);
+            updateStatCard('Avg Diameter', `${overallAvgDiameter.toFixed(1)}px`);
+            updateStatCard('Total Area', `${totalArea.toFixed(0)}px²`);
+            
+            // Update the statistics display
+            updateStatisticsDisplay({
+                group1: {
+                    count: group1Count,
+                    percentage: group1Percentage,
+                    avg_diameter: group1AvgDiameter
+                },
+                group2: {
+                    count: group2Count,
+                    percentage: group2Percentage,
+                    avg_diameter: group2AvgDiameter
+                },
+                total: totalVisible,
+                overall_stats: {
+                    mask_count: totalVisible,
+                    average_diameter: overallAvgDiameter,
+                    diameter_std: diameterStd,
+                    min_diameter: minDiameter,
+                    max_diameter: maxDiameter,
+                    total_area: totalArea,
+                    average_area: avgArea
+                }
+            });
+            
+            // Update detailed statistics section
+            const statsSection = document.getElementById('statsSection');
+            if (statsSection) {
+                updateDetailedDropletStats({
+                    mask_count: totalVisible,
+                    average_diameter: overallAvgDiameter,
+                    diameter_std: diameterStd,
+                    min_diameter: minDiameter,
+                    max_diameter: maxDiameter,
+                    total_area: totalArea,
+                    average_area: avgArea,
+                    diameter_distribution: { min: minDiameter, max: maxDiameter }
+                });
+            }
+            
+            console.log(`Updated statistics: Group1: ${group1Count} (${group1Percentage.toFixed(1)}%), Group2: ${group2Count} (${group2Percentage.toFixed(1)}%)`);
+            
+            // Update mask count display
+            updateMaskCountDisplay();
+        }
+
+        // Update mask count display
+        function updateMaskCountDisplay() {
+            if (!activeMasks) return;
+            
+            const visibleCount = activeMasks.filter(m => !m.hidden).length;
+            const hiddenCount = activeMasks.filter(m => m.hidden).length;
+            
+            const visibleElement = document.getElementById('visibleCount');
+            const hiddenElement = document.getElementById('hiddenCount');
+            
+            if (visibleElement) visibleElement.textContent = visibleCount;
+            if (hiddenElement) hiddenElement.textContent = hiddenCount;
+        }
+
+        // Reset all masks to visible
+        function resetAllMasks() {
+            if (!activeMasks) return;
+            
+            activeMasks.forEach(mask => mask.hidden = false);
+            
+            // Update visualization based on current mode
+            if (currentMode === 'satellite_droplet') {
+                updateSatelliteVisualization();
+                updateSatelliteStatistics();
+            } else {
+                updateGenericVisualization();
+                updateGenericStatistics();
+            }
+            
+            // Show update confirmation
+            showUpdateStatus();
+            
+            console.log('All masks reset to visible');
+        }
+
+        // Show brief update status indicator
+        function showUpdateStatus() {
+            const updateStatus = document.getElementById('updateStatus');
+            if (updateStatus) {
+                updateStatus.style.display = 'block';
+                setTimeout(() => {
+                    updateStatus.style.display = 'none';
+                }, 2000);
+            }
+        }
+
+        // Update the statistics display in the UI
+        function updateStatisticsDisplay(stats) {
+            // Update Group 1 statistics
+            const group1Stats = document.querySelectorAll('.statistics-card')[1];
+            if (group1Stats) {
+                const statItems = group1Stats.querySelectorAll('.stat-value');
+                if (statItems.length >= 3) {
+                    statItems[0].textContent = stats.group1.count;
+                    statItems[1].textContent = `${stats.group1.percentage.toFixed(1)}%`;
+                    statItems[2].textContent = `${stats.group1.avg_diameter.toFixed(1)}px`;
+                }
+            }
+            
+            // Update Group 2 statistics
+            const group2Stats = document.querySelectorAll('.statistics-card')[2];
+            if (group2Stats) {
+                const statItems = group2Stats.querySelectorAll('.stat-value');
+                if (statItems.length >= 3) {
+                    statItems[0].textContent = stats.group2.count;
+                    statItems[1].textContent = `${stats.group2.percentage.toFixed(1)}%`;
+                    statItems[2].textContent = `${stats.group2.avg_diameter.toFixed(1)}px`;
+                }
+            }
+            
+            // Update basic statistics
+            const basicStats = document.querySelectorAll('.statistics-card')[0];
+            if (basicStats) {
+                const statItems = basicStats.querySelectorAll('.stat-value');
+                if (statItems.length >= 1) {
+                    statItems[0].textContent = stats.total;
+                }
+            }
+        }
+
+        // Setup interactive visualization for generic modes (droplet, huge_droplet, multiple)
+        function setupInteractiveGenericVisualization(visualizationImageUrl, originalImageUrl, maskData, mode) {
+            const resultContainer = document.getElementById('resultImage');
+            
+            // Extract masks array based on mode
+            let allMasks = [];
+            if (mode === 'satellite_droplet') {
+                // Already handled by satellite-specific function
+                return;
+            } else if (maskData && maskData.masks) {
+                // For droplet, huge_droplet, and multiple modes
+                allMasks = maskData.masks.map(mask => ({
+                    ...mask, 
+                    hidden: false,
+                    diameter: mask.diameter || Math.sqrt(mask.area * 4 / Math.PI),
+                    group: mode === 'multiple' ? (mask.is_aggregate ? 'aggregate' : 'simple') : 'droplet'
+                }));
+            }
+            
+            // Initialize global activeMasks for toggle functionality
+            activeMasks = allMasks;
+            
+                            console.log(`Setting up interactive ${mode} visualization with ${allMasks.length} masks`);
+                
+                // Debug: Log first few mask bounding boxes for verification
+                if (allMasks.length > 0) {
+                    console.log('First 3 mask bounding boxes for coordinate verification:');
+                    for (let i = 0; i < Math.min(3, allMasks.length); i++) {
+                        const mask = allMasks[i];
+                        console.log(`  Mask ${i}: bbox[${mask.bbox[0]}, ${mask.bbox[1]}, ${mask.bbox[2]}, ${mask.bbox[3]}], area: ${mask.area}`);
+                    }
+                }
+            
+            if (allMasks.length === 0) {
+                // Fallback to simple image if no mask data
+                resultContainer.innerHTML = `
+                    <img src="${visualizationImageUrl}" alt="${mode} Analysis">
+                `;
+                return;
+            }
+            
+            resultContainer.innerHTML = `
+                <div class="interactive-container" id="interactiveContainer">
+                    <img src="${visualizationImageUrl}" alt="${mode} Analysis" class="display-image" id="displayImage">
+                    <div class="mask-highlight" id="maskHighlight"></div>
+                    <div class="interactive-tooltip" id="interactiveTooltip">
+                        <div class="tooltip-mode-badge" id="tooltipModeBadge"></div>
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Diameter:</span> <span id="tooltipDiameter"></span></div>
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Area:</span> <span id="tooltipArea"></span></div>
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Width:</span> <span id="tooltipWidth"></span></div>
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Height:</span> <span id="tooltipHeight"></span></div>
+                        ${mode === 'multiple' ? '<div class="tooltip-info-line"><span class="tooltip-info-label">Overlaps:</span> <span id="tooltipOverlaps"></span></div>' : ''}
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Position:</span> <span id="tooltipPosition"></span></div>
+                        <div class="tooltip-info-line"><span class="tooltip-info-label">Status:</span> <span id="tooltipStatus">Active</span></div>
+                        <div class="tooltip-action">Click to toggle visibility</div>
+                    </div>
+                </div>
+            `;
+            
+            const container = document.getElementById('interactiveContainer');
+            const displayImage = document.getElementById('displayImage');
+            const tooltip = document.getElementById('interactiveTooltip');
+            const highlight = document.getElementById('maskHighlight');
+            
+            function checkImageLoaded() {
+                if (displayImage.complete) {
+                    setTimeout(() => {
+                        // Let image use natural dimensions - no explicit sizing
+                        const naturalWidth = displayImage.naturalWidth;
+                        const naturalHeight = displayImage.naturalHeight;
+                        
+                        console.log(`Using natural dimensions: ${naturalWidth}x${naturalHeight}px`);
+                        console.log(`Image loaded with embedded bounding boxes: ${displayImage.naturalWidth}x${displayImage.naturalHeight}`);
+                        console.log(`Display image dimensions - Natural: ${displayImage.naturalWidth}x${displayImage.naturalHeight}, Displayed: ${displayImage.offsetWidth}x${displayImage.offsetHeight}`);
+                        console.log(`Using embedded bounding boxes - no scaling needed`);
+                        setupGenericHoverEvents(container, displayImage, allMasks, tooltip, highlight, mode);
+                        
+                        // No separate overlay drawing needed - bounding boxes are embedded in image
+                        console.log('Using embedded bounding boxes from visualization image');
+                        // Initialize mask count display
+                        setTimeout(() => updateMaskCountDisplay(), 200);
+                    }, 100);
+                }
+            }
+            
+            displayImage.onload = checkImageLoaded;
+            
+            // Start loading image
+            if (displayImage.complete) {
+                checkImageLoaded();
+            }
+            
+            // Add control panel for mask management
+            const controlPanel = document.createElement('div');
+            controlPanel.id = 'interactiveControlPanel';
+            controlPanel.style.cssText = `
+                background: #f8f9fa;
+                border: 1px solid #e9ecef;
+                border-radius: 8px;
+                padding: 15px;
+                margin-top: 15px;
+                text-align: center;
+            `;
+            controlPanel.innerHTML = `
+                <h4>Interactive Controls (${mode.charAt(0).toUpperCase() + mode.slice(1)} Mode)</h4>
+                <p><strong>Hover:</strong> View mask details | <strong>Click:</strong> Toggle mask visibility</p>
+                <div id="maskStatus" style="margin-top: 10px;">
+                    <span id="visibleCount">0</span> visible, <span id="hiddenCount">0</span> hidden
+                    <button onclick="resetAllMasks()" style="margin-left: 15px; padding: 5px 10px; border-radius: 4px; border: 1px solid #667eea; background: #667eea; color: white; cursor: pointer;">Reset All</button>
+                </div>
+                <div id="updateStatus" style="margin-top: 5px; font-size: 11px; color: #28a745; display: none;">
+                    ✓ Analysis results updated
+                </div>
+            `;
+            resultContainer.appendChild(controlPanel);
+        }
+
+        // Setup hover events for generic modes
+        function setupGenericHoverEvents(container, displayImage, masks, tooltip, highlight, mode) {
+            container.addEventListener('mousemove', function(e) {
+                const rect = displayImage.getBoundingClientRect();
+                // Use direct mouse coordinates relative to image - no transformations
+                const imageX = e.clientX - rect.left;
+                const imageY = e.clientY - rect.top;
+                
+                // Debug coordinate system (generic mode)
+                if (Math.random() < 0.1) { // Occasional debugging
+                    console.log(`GENERIC DEBUG COORDS: Mouse(${e.clientX}, ${e.clientY}) Rect(${rect.left}, ${rect.top}) -> Image(${imageX}, ${imageY})`);
+                    console.log(`GENERIC DEBUG RECT: left=${rect.left}, top=${rect.top}, width=${rect.width}, height=${rect.height}`);
+                    console.log(`GENERIC DEBUG IMAGE: naturalWidth=${displayImage.naturalWidth}, naturalHeight=${displayImage.naturalHeight}`);
+                }
+                
+                // Find the smallest mask that contains this point
+                let hoveredMask = null;
+                let smallestArea = Infinity;
+                
+                for (let mask of masks) {
+                    const [bx, by, bw, bh] = mask.bbox;
+                    const isInside = (imageX >= bx && imageX <= (bx + bw) && imageY >= by && imageY <= (by + bh));
+                    
+                    if (isInside && mask.area < smallestArea) {
+                        hoveredMask = mask;
+                        smallestArea = mask.area;
+                    }
+                }
+                
+                if (hoveredMask) {
+                    showGenericTooltip(e, hoveredMask, tooltip, highlight, rect, mode);
+                } else {
+                    hideGenericTooltip(tooltip, highlight);
+                }
+            });
+            
+            container.addEventListener('mouseleave', function() {
+                hideGenericTooltip(tooltip, highlight);
+            });
+            
+            // Add click event for mask toggling
+            container.addEventListener('click', function(e) {
+                const rect = displayImage.getBoundingClientRect();
+                // Use direct mouse coordinates relative to image - no transformations
+                const imageX = e.clientX - rect.left;
+                const imageY = e.clientY - rect.top;
+                
+                // Find the clicked mask
+                let clickedMask = null;
+                let smallestArea = Infinity;
+                
+                for (let mask of masks) {
+                    const [bx, by, bw, bh] = mask.bbox;
+                    const isInside = (imageX >= bx && imageX <= (bx + bw) && imageY >= by && imageY <= (by + bh));
+                    
+                    if (isInside && mask.area < smallestArea) {
+                        clickedMask = mask;
+                        smallestArea = mask.area;
+                    }
+                }
+                
+                if (clickedMask) {
+                    toggleMask(clickedMask);
+                }
+            });
+        }
+
+        // Show tooltip for generic modes
+        function showGenericTooltip(mouseEvent, mask, tooltip, highlight, imageRect, mode) {
+            const [bx, by, bw, bh] = mask.bbox;
+            
+            // Update tooltip content
+            const modeBadge = document.getElementById('tooltipModeBadge');
+            const tooltipDiameter = document.getElementById('tooltipDiameter');
+            const tooltipArea = document.getElementById('tooltipArea');
+            const tooltipWidth = document.getElementById('tooltipWidth');
+            const tooltipHeight = document.getElementById('tooltipHeight');
+            const tooltipOverlaps = document.getElementById('tooltipOverlaps');
+            const tooltipPosition = document.getElementById('tooltipPosition');
+            const tooltipStatus = document.getElementById('tooltipStatus');
+            
+            // Set mode badge
+            if (mode === 'multiple') {
+                modeBadge.textContent = mask.is_aggregate ? 'Aggregate' : 'Simple';
+                modeBadge.className = `tooltip-mode-badge tooltip-${mask.is_aggregate ? 'aggregate' : 'simple'}`;
+            } else {
+                modeBadge.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+                modeBadge.className = `tooltip-mode-badge tooltip-${mode}`;
+            }
+            
+            tooltipDiameter.textContent = `${mask.diameter.toFixed(1)}px`;
+            tooltipArea.textContent = `${mask.area.toLocaleString()}px²`;
+            tooltipWidth.textContent = `${Math.round(bw)}px`;
+            tooltipHeight.textContent = `${Math.round(bh)}px`;
+            tooltipPosition.textContent = `(${Math.round(bx + bw/2)}, ${Math.round(by + bh/2)})`;
+            tooltipStatus.textContent = mask.hidden ? 'Hidden' : 'Active';
+            tooltipStatus.style.color = mask.hidden ? '#ff6b6b' : '#4ecdc4';
+            
+            // Show overlap count for multiple mode
+            if (mode === 'multiple' && tooltipOverlaps) {
+                tooltipOverlaps.textContent = mask.overlap_count || 0;
+            }
+            
+            // Position tooltip
+            const containerRect = document.getElementById('interactiveContainer').getBoundingClientRect();
+            const tooltipRect = tooltip.getBoundingClientRect();
+            
+            let tooltipX = mouseEvent.clientX - containerRect.left + 15;
+            let tooltipY = mouseEvent.clientY - containerRect.top - 10;
+            
+            // Boundary checking
+            if (tooltipX + tooltipRect.width > containerRect.width) {
+                tooltipX = mouseEvent.clientX - containerRect.left - tooltipRect.width - 15;
+            }
+            if (tooltipY < 0) {
+                tooltipY = mouseEvent.clientY - containerRect.top + 20;
+            }
+            
+            tooltip.style.left = tooltipX + 'px';
+            tooltip.style.top = tooltipY + 'px';
+            tooltip.style.opacity = '1';
+            tooltip.style.pointerEvents = 'none';
+            
+            // Show highlight - use bbox coordinates directly (no scaling)
+            const highlightX = bx;
+            const highlightY = by;
+            const highlightW = bw;
+            const highlightH = bh;
+            
+            highlight.style.left = highlightX + 'px';
+            highlight.style.top = highlightY + 'px';
+            highlight.style.width = highlightW + 'px';
+            highlight.style.height = highlightH + 'px';
+            highlight.style.opacity = '1';
+        }
+
+        // Hide tooltip for generic modes
+        function hideGenericTooltip(tooltip, highlight) {
+            tooltip.style.opacity = '0';
+            highlight.style.opacity = '0';
+        }
+
+        // NOTE: Generic overlay drawing removed - bounding boxes are now embedded in the visualization image
+        // This ensures perfect alignment since bounding boxes are part of the actual image pixels
+
+        // Update visualization for generic modes  
+        function updateGenericVisualization() {
+            const highlights = document.querySelectorAll('.mask-overlay');
+            highlights.forEach(h => h.remove());
+            
+            // NOTE: Visual updates now handled by regenerating the image with new mask visibility  
+            // Bounding boxes are embedded in the image, so no overlay redrawing needed
+            console.log('Generic mask visibility updated - using embedded bounding boxes');
+        }
+
+        // Update statistics for generic modes
+        function updateGenericStatistics() {
+            if (!activeMasks) return;
+            
+            const visibleMasks = activeMasks.filter(m => !m.hidden);
+            const totalVisible = visibleMasks.length;
+            
+            // Calculate comprehensive statistics
+            const areas = visibleMasks.map(m => m.area);
+            const diameters = visibleMasks.map(m => m.diameter);
+            
+            const avgDiameter = diameters.length > 0 ? diameters.reduce((sum, d) => sum + d, 0) / diameters.length : 0;
+            const avgArea = areas.length > 0 ? areas.reduce((sum, a) => sum + a, 0) / areas.length : 0;
+            const totalArea = areas.reduce((sum, a) => sum + a, 0);
+            
+            // Calculate diameter statistics
+            const minDiameter = diameters.length > 0 ? Math.min(...diameters) : 0;
+            const maxDiameter = diameters.length > 0 ? Math.max(...diameters) : 0;
+            const diameterStd = diameters.length > 1 ? calculateStandardDeviation(diameters) : 0;
+            
+            // Update all statistics cards
+            updateStatCard('Final Droplets', totalVisible);
+            updateStatCard('Avg Diameter', `${avgDiameter.toFixed(1)}px`);
+            updateStatCard('Total Area', `${totalArea.toFixed(0)}px²`);
+            
+            // Update detailed statistics sections
+            const statsSection = document.getElementById('statsSection');
+            if (statsSection && (currentMode === 'droplet' || currentMode === 'huge_droplet')) {
+                updateDetailedDropletStats({
+                    mask_count: totalVisible,
+                    average_diameter: avgDiameter,
+                    diameter_std: diameterStd,
+                    min_diameter: minDiameter,
+                    max_diameter: maxDiameter,
+                    total_area: totalArea,
+                    average_area: avgArea,
+                    diameter_distribution: { min: minDiameter, max: maxDiameter }
+                });
+            }
+            
+            // Handle multiple mode specific updates
+            if (currentMode === 'multiple') {
+                updateMultipleModeStats(visibleMasks);
+            }
+            
+            console.log(`Updated ${currentMode} statistics: ${totalVisible} visible masks, avg diameter: ${avgDiameter.toFixed(1)}px`);
+            
+            // Update mask count display
+            updateMaskCountDisplay();
+        }
+
+        // Helper function to calculate standard deviation
+        function calculateStandardDeviation(values) {
+            if (values.length <= 1) return 0;
+            const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+            const squaredDiffs = values.map(val => Math.pow(val - mean, 2));
+            const avgSquaredDiff = squaredDiffs.reduce((sum, val) => sum + val, 0) / values.length;
+            return Math.sqrt(avgSquaredDiff);
+        }
+
+        // Helper function to update a specific stat card
+        function updateStatCard(label, value) {
+            const statCards = document.querySelectorAll('.stat-card');
+            for (let card of statCards) {
+                const labelElement = card.querySelector('.stat-label');
+                if (labelElement && labelElement.textContent === label) {
+                    const valueElement = card.querySelector('.stat-value');
+                    if (valueElement) valueElement.textContent = value;
+                    break;
+                }
+            }
+        }
+
+        // Update detailed droplet statistics section
+        function updateDetailedDropletStats(stats) {
+            const statItems = document.querySelectorAll('.stat-item');
+            
+            const statUpdates = {
+                'Total Droplets:': stats.mask_count,
+                'Average Diameter:': `${stats.average_diameter.toFixed(1)}px`,
+                'Diameter Std Dev:': `${stats.diameter_std.toFixed(1)}px`,
+                'Min Diameter:': `${stats.min_diameter.toFixed(1)}px`,
+                'Max Diameter:': `${stats.max_diameter.toFixed(1)}px`,
+                'Total Area:': `${stats.total_area.toFixed(0)}px²`,
+                'Average Area:': `${stats.average_area.toFixed(0)}px²`,
+                'Diameter Distribution:': `${stats.diameter_distribution.min.toFixed(1)} - ${stats.diameter_distribution.max.toFixed(1)}px`
+            };
+            
+            statItems.forEach(item => {
+                const label = item.querySelector('.stat-label');
+                const value = item.querySelector('.stat-value');
+                if (label && value && statUpdates[label.textContent]) {
+                    value.textContent = statUpdates[label.textContent];
+                }
+            });
+        }
+
+        // Update multiple mode specific statistics
+        function updateMultipleModeStats(visibleMasks) {
+            const aggregateMasks = visibleMasks.filter(m => m.is_aggregate);
+            const simpleMasks = visibleMasks.filter(m => !m.is_aggregate);
+            const totalOverlaps = visibleMasks.reduce((sum, m) => sum + (m.overlap_count || 0), 0);
+            
+            // Update overlap percentage
+            const overlapPercentage = visibleMasks.length > 0 ? (aggregateMasks.length / visibleMasks.length * 100) : 0;
+            
+            // Update multiple mode specific cards
+            updateStatCard('Large Masks', visibleMasks.length);
+            updateStatCard('Total Overlaps', totalOverlaps);
+            updateStatCard('Overlap %', `${overlapPercentage.toFixed(1)}%`);
+            
+            console.log(`Multiple mode: ${aggregateMasks.length} aggregate, ${simpleMasks.length} simple, ${totalOverlaps} total overlaps`);
+        }
+
+        // Show image modal function
+        function showImageModal(imageSrc, filename) {
+            // Create modal overlay
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 10000;
+                cursor: pointer;
+            `;
+            
+            // Create image container
+            const imageContainer = document.createElement('div');
+            imageContainer.style.cssText = `
+                max-width: 90%;
+                max-height: 90%;
+                text-align: center;
+            `;
+            
+            // Create image
+            const img = document.createElement('img');
+            img.src = imageSrc;
+            img.alt = filename;
+            img.style.cssText = `
+                max-width: 100%;
+                max-height: 100%;
+                border-radius: 10px;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            `;
+            
+            // Create caption
+            const caption = document.createElement('div');
+            caption.textContent = filename;
+            caption.style.cssText = `
+                color: white;
+                margin-top: 10px;
+                font-size: 1.1rem;
+                font-weight: 600;
+            `;
+            
+            imageContainer.appendChild(img);
+            imageContainer.appendChild(caption);
+            modal.appendChild(imageContainer);
+            
+            // Close on click
+            modal.addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+            
+            // Add to body
+            document.body.appendChild(modal);
+        }
+
         // Check server health on load
         window.addEventListener('load', async () => {
             try {
@@ -2515,4 +3479,5 @@
         });
     </script>
 </body>
+</html> 
 </html> 

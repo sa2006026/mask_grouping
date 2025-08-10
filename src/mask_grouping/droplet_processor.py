@@ -341,7 +341,12 @@ class DropletProcessor:
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+        # Calculate figure size to match original image dimensions  
+        height, width = image.shape[:2]
+        dpi = 100  # Use consistent DPI
+        figsize = (width/dpi, height/dpi)
+        
+        fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
         ax.imshow(image)
         
         # Draw each mask with uniform color
@@ -392,7 +397,7 @@ class DropletProcessor:
         # Save visualization
         timestamp = int(time.time())
         output_path = os.path.join(output_dir, f"droplet_analysis_{timestamp}.png")
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0)
         plt.close()
         
         print(f"Saved droplet visualization: {output_path}")

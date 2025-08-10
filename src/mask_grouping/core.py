@@ -871,7 +871,12 @@ class MaskGroupingProcessor:
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+        # Calculate figure size to match original image dimensions  
+        height, width = image.shape[:2]
+        dpi = 100  # Use consistent DPI
+        figsize = (width/dpi, height/dpi)
+        
+        fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
         ax.imshow(image)
         
         # Collect all overlapping smaller masks from final_masks
@@ -985,7 +990,7 @@ class MaskGroupingProcessor:
         # Save visualization
         timestamp = int(time.time())
         output_path = os.path.join(output_dir, f"overlap_analysis_masks_{self.overlap_threshold*100:.0f}pct_{timestamp}.png")
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0)
         plt.close()
         
         print(f"Saved overlap visualization: {output_path}")
@@ -1585,7 +1590,12 @@ class HugeDropletProcessor:
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+        # Calculate figure size to match original image dimensions  
+        height, width = image.shape[:2]
+        dpi = 100  # Use consistent DPI
+        figsize = (width/dpi, height/dpi)
+        
+        fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
         ax.imshow(image)
         
         # Draw each mask with uniform color
@@ -1636,7 +1646,7 @@ class HugeDropletProcessor:
         # Save visualization
         timestamp = int(time.time())
         output_path = os.path.join(output_dir, f"huge_droplet_analysis_{timestamp}.png")
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0)
         plt.close()
         
         print(f"Saved huge droplet visualization: {output_path}")
@@ -1649,7 +1659,12 @@ class HugeDropletProcessor:
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+        # Calculate figure size to match original image dimensions  
+        height, width = image.shape[:2]
+        dpi = 100  # Use consistent DPI
+        figsize = (width/dpi, height/dpi)
+        
+        fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
         ax.imshow(image)
         
         # Colors for the two groups
@@ -1729,8 +1744,53 @@ class HugeDropletProcessor:
         # Save visualization
         timestamp = int(time.time())
         output_path = os.path.join(output_dir, f"satellite_droplet_analysis_{timestamp}.png")
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0)
         plt.close()
         
         print(f"Saved satellite droplet visualization: {output_path}")
-        return output_path 
+        return output_path
+    
+    def apply_diameter_filter_to_cluster(self, cluster_masks: List[Dict], filter_percentage: float = 0.2) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Apply diameter-based filtering to a cluster of masks.
+        
+        Args:
+            cluster_masks: List of mask dictionaries
+            filter_percentage: Percentage above average to filter (0.2 = 20%)
+            
+        Returns:
+            Tuple of (filtered_masks, removed_masks)
+        """
+        if not cluster_masks:
+            return [], []
+            
+        # Calculate diameters for all masks
+        diameters = []
+        for mask in cluster_masks:
+            diameter = 2 * np.sqrt(mask['area'] / np.pi)
+            mask['diameter'] = diameter  # Store for later use
+            diameters.append(diameter)
+        
+        # Calculate average diameter and threshold
+        avg_diameter = np.mean(diameters)
+        diameter_threshold = avg_diameter * (1.0 + filter_percentage)
+        
+        print(f"🔍 Applying {filter_percentage*100:.0f}% diameter filter:")
+        print(f"   📊 Original cluster count: {len(cluster_masks)}")
+        print(f"   📏 Average diameter: {avg_diameter:.1f}px")
+        print(f"   🚫 Diameter threshold ({100+filter_percentage*100:.0f}%): {diameter_threshold:.1f}px")
+        
+        # Filter masks
+        filtered_masks = []
+        removed_masks = []
+        
+        for mask in cluster_masks:
+            if mask['diameter'] <= diameter_threshold:
+                filtered_masks.append(mask)
+            else:
+                removed_masks.append(mask)
+        
+        print(f"   ✅ Filtered cluster count: {len(filtered_masks)}")
+        print(f"   🗑️  Removed oversized masks: {len(removed_masks)}")
+        
+        return filtered_masks, removed_masks 

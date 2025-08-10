@@ -194,6 +194,129 @@ def _initialize_pytorch_backend():
     huge_droplet_processor = HugeDropletProcessor(huge_droplet_mask_generator)
 
 
+def generate_preview_image_with_masks(image_array, masks, mode):
+    """Generate a preview image with bounding boxes overlaid on masks."""
+    import cv2
+    from io import BytesIO
+    import base64
+    
+    # Create a copy of the original image
+    preview_image = image_array.copy()
+    if len(preview_image.shape) == 3:
+        preview_rgb = cv2.cvtColor(preview_image, cv2.COLOR_BGR2RGB)
+    else:
+        preview_rgb = cv2.cvtColor(preview_image, cv2.COLOR_GRAY2RGB)
+    
+    # Draw bounding boxes for each mask
+    colors = {
+        'droplet': (0, 255, 0),        # Green for droplet mode
+        'huge_droplet': (0, 255, 255), # Cyan for huge droplet mode
+        'satellite_droplet': [(0, 255, 0), (255, 0, 0)],  # Green and Red for satellite mode
+        'multiple': (255, 255, 0)      # Yellow for multiple mode
+    }
+    
+    if mode == 'satellite_droplet':
+        # For satellite mode, use clustering to determine colors
+        from mask_grouping.core import MaskGroupingProcessor
+        temp_processor = MaskGroupingProcessor(mask_generator)
+        clustered_masks, _ = temp_processor._cluster_masks_kmeans(masks, n_clusters=2)
+        
+        # Draw group 1 (smaller) in green, group 2 (larger) in red
+        if clustered_masks[0] and clustered_masks[1]:
+            avg_area_0 = np.mean([mask['area'] for mask in clustered_masks[0]])
+            avg_area_1 = np.mean([mask['area'] for mask in clustered_masks[1]])
+            if avg_area_0 > avg_area_1:
+                larger_cluster, smaller_cluster = clustered_masks[0], clustered_masks[1]
+            else:
+                larger_cluster, smaller_cluster = clustered_masks[1], clustered_masks[0]
+        else:
+            larger_cluster = clustered_masks[0] if clustered_masks[0] else clustered_masks[1]
+            smaller_cluster = clustered_masks[1] if clustered_masks[0] else clustered_masks[0]
+        
+        # Apply 20% diameter filter to larger cluster for consistent visualization
+        larger_cluster_original = larger_cluster.copy()
+        larger_cluster_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster_original]
+        
+        if larger_cluster_diameters:
+            avg_diameter_larger_group = np.mean(larger_cluster_diameters)
+            diameter_threshold = avg_diameter_larger_group * 1.2  # 20% larger than average
+            
+            # Filter out oversized masks from larger cluster
+            filtered_larger_cluster = []
+            for mask in larger_cluster_original:
+                diameter = 2 * np.sqrt(mask['area'] / np.pi)
+                if diameter <= diameter_threshold:
+                    filtered_larger_cluster.append(mask)
+            
+            larger_cluster = filtered_larger_cluster
+        
+        # Draw bounding boxes for each group
+        for mask in smaller_cluster:
+            if 'bbox' in mask:
+                x, y, w, h = mask['bbox']
+                cv2.rectangle(preview_rgb, (int(x), int(y)), (int(x+w), int(y+h)), (0, 255, 0), 2)
+        
+        for mask in larger_cluster:
+            if 'bbox' in mask:
+                x, y, w, h = mask['bbox']
+                cv2.rectangle(preview_rgb, (int(x), int(y)), (int(x+w), int(y+h)), (255, 0, 0), 2)
+    else:
+        # For other modes, use single color
+        color = colors.get(mode, (255, 255, 0))
+        for mask in masks:
+            if 'bbox' in mask:
+                x, y, w, h = mask['bbox']
+                cv2.rectangle(preview_rgb, (int(x), int(y)), (int(x+w), int(y+h)), color, 2)
+    
+    # No resizing - preserve original image dimensions for coordinate consistency
+    
+    # Convert to base64 for transmission
+    _, buffer = cv2.imencode('.jpg', cv2.cvtColor(preview_rgb, cv2.COLOR_RGB2BGR))
+    img_base64 = base64.b64encode(buffer).decode('utf-8')
+    
+    return f"data:image/jpeg;base64,{img_base64}"
+
+
+def generate_custom_preview_image(image_array, masks, mode):
+    """Generate a custom preview image with bounding boxes based on user selections."""
+    import cv2
+    
+    # Create a copy of the original image
+    preview_image = image_array.copy()
+    if len(preview_image.shape) == 3:
+        preview_rgb = cv2.cvtColor(preview_image, cv2.COLOR_BGR2RGB)
+    else:
+        preview_rgb = cv2.cvtColor(preview_image, cv2.COLOR_GRAY2RGB)
+    
+    # Draw bounding boxes based on mode and mask properties
+    for mask in masks:
+        if 'bbox' not in mask:
+            continue
+            
+        x, y, w, h = mask['bbox']
+        
+        # Choose color based on mode and mask properties
+        if mode == 'satellite_droplet' and 'group' in mask:
+            # Use group information from frontend
+            color = (0, 255, 0) if mask['group'] == 1 else (255, 0, 0)  # Green for group 1, Red for group 2
+        elif mode == 'multiple' and 'is_aggregate' in mask:
+            # Orange for aggregate masks, Green for simple masks
+            color = (255, 165, 0) if mask['is_aggregate'] else (0, 255, 0)
+        elif mode == 'huge_droplet':
+            color = (0, 255, 255)  # Cyan for huge droplet mode
+        else:
+            color = (0, 255, 0)  # Default green for droplet mode
+        
+        cv2.rectangle(preview_rgb, (int(x), int(y)), (int(x+w), int(y+h)), color, 2)
+    
+    # No resizing - preserve original image dimensions for coordinate consistency
+    
+    # Convert to base64 for transmission
+    _, buffer = cv2.imencode('.jpg', cv2.cvtColor(preview_rgb, cv2.COLOR_RGB2BGR))
+    img_base64 = base64.b64encode(buffer).decode('utf-8')
+    
+    return f"data:image/jpeg;base64,{img_base64}"
+
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -614,7 +737,19 @@ def analyze_overlap():
                 'large_masks_analyzed': len(result['final_masks']),
                 'total_overlaps_found': int(total_overlaps),
                 'overall_overlap_percentage': float(overlap_stats.get('overlap_percentage', 0.0)),
-                'overlap_analysis_image': f"data:image/png;base64,{overlap_viz_base64}"
+                'overlap_analysis_image': f"data:image/png;base64,{overlap_viz_base64}",
+                'original_image_for_hover': f"data:image/png;base64,{base64.b64encode(cv2.imencode('.png', image_array)[1]).decode('utf-8')}"
+            },
+            'mask_data_for_frontend': {
+                'masks': [convert_numpy_types({
+                    'bbox': mask['bbox'],
+                    'area': mask['area'],
+                    'diameter': float(np.sqrt(mask['area'] * 4 / np.pi)),
+                    'overlap_count': mask.get('overlap_count', 0),
+                    'is_aggregate': mask.get('is_aggregate_overlap', False),
+                    'circularity': mask.get('circularity', 0),
+                    'stability_score': mask.get('stability_score', 0)
+                }) for mask in result['final_masks']]
             },
             'overlap_statistics': overlap_statistics,
             'detailed_statistics': convert_numpy_types(overlap_stats),
@@ -826,7 +961,8 @@ def analyze_droplets():
                 'masks_after_filtering': int(result['filtered_masks']),
                 'final_droplet_count': droplet_stats['mask_count'],
                 'average_diameter_pixels': float(droplet_stats['average_diameter']),
-                'droplet_analysis_image': f"data:image/png;base64,{viz_base64}"
+                'droplet_analysis_image': f"data:image/png;base64,{viz_base64}",
+                'original_image_for_hover': f"data:image/png;base64,{base64.b64encode(cv2.imencode('.png', image_array)[1]).decode('utf-8')}"
             },
             'droplet_statistics': {
                 'mask_count': droplet_stats['mask_count'],
@@ -837,6 +973,15 @@ def analyze_droplets():
                 'total_area': droplet_stats['total_area'],
                 'average_area': droplet_stats['average_area'],
                 'diameter_distribution': droplet_stats['diameter_distribution']
+            },
+            'mask_data_for_frontend': {
+                'masks': [convert_numpy_types({
+                    'bbox': mask['bbox'],
+                    'area': mask['area'],
+                    'diameter': float(np.sqrt(mask['area'] * 4 / np.pi)),
+                    'circularity': mask.get('circularity', 0),
+                    'stability_score': mask.get('stability_score', 0)
+                }) for mask in result['final_masks']]
             },
             'processing_details': convert_numpy_types(result['processing_details'])
         }
@@ -910,7 +1055,8 @@ def analyze_huge_droplets():
                 'masks_after_filtering': int(result['filtered_masks']),
                 'final_droplet_count': droplet_stats['mask_count'],
                 'average_diameter_pixels': float(droplet_stats['average_diameter']),
-                'huge_droplet_analysis_image': f"data:image/png;base64,{viz_base64}"
+                'huge_droplet_analysis_image': f"data:image/png;base64,{viz_base64}",
+                'original_image_for_hover': f"data:image/png;base64,{base64.b64encode(cv2.imencode('.png', image_array)[1]).decode('utf-8')}"
             },
             'droplet_statistics': {
                 'mask_count': droplet_stats['mask_count'],
@@ -921,6 +1067,15 @@ def analyze_huge_droplets():
                 'total_area': droplet_stats['total_area'],
                 'average_area': droplet_stats['average_area'],
                 'diameter_distribution': droplet_stats['diameter_distribution']
+            },
+            'mask_data_for_frontend': {
+                'masks': [convert_numpy_types({
+                    'bbox': mask['bbox'],
+                    'area': mask['area'],
+                    'diameter': float(np.sqrt(mask['area'] * 4 / np.pi)),
+                    'circularity': mask.get('circularity', 0),
+                    'stability_score': mask.get('stability_score', 0)
+                }) for mask in result['final_masks']]
             },
             'processing_details': convert_numpy_types(result['processing_details'])
         }
@@ -1183,8 +1338,40 @@ def analyze_satellite_droplets():
         
         # Group 1: Smaller cluster (smaller average area)
         group1_diameters = calculate_diameters_from_masks(smaller_cluster)
-        # Group 2: Larger cluster (larger average area)  
-        group2_diameters = calculate_diameters_from_masks(larger_cluster)
+        
+        # Group 2: Larger cluster (larger average area) - Apply additional 20% filter
+        larger_cluster_original = larger_cluster.copy()
+        group2_diameters_original = calculate_diameters_from_masks(larger_cluster_original)
+        
+        # Calculate average diameter of the larger group before filtering
+        if group2_diameters_original:
+            avg_diameter_larger_group = np.mean(group2_diameters_original)
+            diameter_threshold = avg_diameter_larger_group * 1.2  # 20% larger than average
+            
+            print(f"🔍 Applying 20% diameter filter to larger group:")
+            print(f"   📊 Original larger group count: {len(larger_cluster_original)}")
+            print(f"   📏 Average diameter: {avg_diameter_larger_group:.1f}px")
+            print(f"   🚫 Diameter threshold (120%): {diameter_threshold:.1f}px")
+            
+            # Filter out masks that are 20% larger than average diameter
+            filtered_larger_cluster = []
+            removed_oversized = []
+            
+            for mask in larger_cluster_original:
+                diameter = 2 * np.sqrt(mask['area'] / np.pi)
+                if diameter <= diameter_threshold:
+                    filtered_larger_cluster.append(mask)
+                else:
+                    removed_oversized.append(mask)
+            
+            larger_cluster = filtered_larger_cluster
+            print(f"   ✅ Filtered larger group count: {len(larger_cluster)}")
+            print(f"   🗑️  Removed oversized masks: {len(removed_oversized)}")
+            
+            # Recalculate diameters for the filtered larger cluster
+            group2_diameters = calculate_diameters_from_masks(larger_cluster)
+        else:
+            group2_diameters = []
         
         total_count = len(group1_diameters) + len(group2_diameters)
         
@@ -1215,6 +1402,12 @@ def analyze_satellite_droplets():
         print(f"K-means based grouping:")
         print(f"  Group 1 (Smaller): {len(group1_diameters)} masks, avg diameter: {group1_stats['avg_diameter']:.1f}px")
         print(f"  Group 2 (Larger): {len(group2_diameters)} masks, avg diameter: {group2_stats['avg_diameter']:.1f}px")
+        
+        # Report filtering results if applied
+        if 'group2_diameters_original' in locals() and group2_diameters_original:
+            removed_count = len(group2_diameters_original) - len(group2_diameters)
+            if removed_count > 0:
+                print(f"  🔧 Filtering summary: Removed {removed_count} oversized masks from larger group")
         
         # Debug: Print sample bounding boxes being sent to frontend
         print(f"\nDEBUG: Sample bounding boxes for frontend:")
@@ -1365,6 +1558,11 @@ def batch_process_files():
                 result = processor.process_image_array(image_array)
                 file_processing_time = time.time() - file_start_time
                 
+                # Generate preview image with bounding boxes
+                preview_image_data = generate_preview_image_with_masks(
+                    image_array, result['final_masks'], mode
+                )
+                
                 # Create file-specific result
                 file_result = {
                     'filename': file.filename,
@@ -1375,7 +1573,8 @@ def batch_process_files():
                     'statistics': convert_numpy_types(result['statistics']),
                     'total_masks': int(result['total_masks']),
                     'filtered_masks': int(result['filtered_masks']),
-                    'image_shape': list(image_array.shape)
+                    'image_shape': list(image_array.shape),
+                    'preview_image': preview_image_data
                 }
                 
                 # Add mode-specific data
@@ -1405,15 +1604,40 @@ def batch_process_files():
                         larger_cluster = clustered_masks[0] if clustered_masks[0] else clustered_masks[1]
                         smaller_cluster = clustered_masks[1] if clustered_masks[0] else clustered_masks[0]
                     
-                    # Calculate group statistics
+                    # Calculate group statistics with 20% filter for larger group
                     group1_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in smaller_cluster]
-                    group2_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
+                    
+                    # Apply 20% diameter filter to larger cluster
+                    larger_cluster_original = larger_cluster.copy()
+                    group2_diameters_original = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster_original]
+                    
+                    if group2_diameters_original:
+                        avg_diameter_larger_group = np.mean(group2_diameters_original)
+                        diameter_threshold = avg_diameter_larger_group * 1.2  # 20% larger than average
+                        
+                        # Filter out oversized masks from larger cluster
+                        filtered_larger_cluster = []
+                        for mask in larger_cluster_original:
+                            diameter = 2 * np.sqrt(mask['area'] / np.pi)
+                            if diameter <= diameter_threshold:
+                                filtered_larger_cluster.append(mask)
+                        
+                        larger_cluster = filtered_larger_cluster
+                        group2_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
+                    else:
+                        group2_diameters = []
+                    
+                    total_count = len(group1_diameters) + len(group2_diameters)
+                    group1_percentage = (len(group1_diameters) / total_count * 100) if total_count > 0 else 0
+                    group2_percentage = (len(group2_diameters) / total_count * 100) if total_count > 0 else 0
                     
                     file_result.update({
                         'mask_count': result['statistics']['mask_count'],
                         'average_diameter': float(result['statistics']['average_diameter']),
                         'group1_count': len(group1_diameters),
                         'group2_count': len(group2_diameters),
+                        'group1_percentage': float(group1_percentage),
+                        'group2_percentage': float(group2_percentage),
                         'group1_avg_diameter': float(np.mean(group1_diameters)) if group1_diameters else 0,
                         'group2_avg_diameter': float(np.mean(group2_diameters)) if group2_diameters else 0,
                         'group1_diameters': [float(d) for d in group1_diameters],
@@ -1631,9 +1855,28 @@ def batch_process_base64():
                         larger_cluster = clustered_masks[0] if clustered_masks[0] else clustered_masks[1]
                         smaller_cluster = clustered_masks[1] if clustered_masks[0] else clustered_masks[0]
                     
-                    # Calculate group statistics
+                    # Calculate group statistics with 20% filter for larger group
                     group1_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in smaller_cluster]
-                    group2_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
+                    
+                    # Apply 20% diameter filter to larger cluster
+                    larger_cluster_original = larger_cluster.copy()
+                    group2_diameters_original = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster_original]
+                    
+                    if group2_diameters_original:
+                        avg_diameter_larger_group = np.mean(group2_diameters_original)
+                        diameter_threshold = avg_diameter_larger_group * 1.2  # 20% larger than average
+                        
+                        # Filter out oversized masks from larger cluster
+                        filtered_larger_cluster = []
+                        for mask in larger_cluster_original:
+                            diameter = 2 * np.sqrt(mask['area'] / np.pi)
+                            if diameter <= diameter_threshold:
+                                filtered_larger_cluster.append(mask)
+                        
+                        larger_cluster = filtered_larger_cluster
+                        group2_diameters = [2 * np.sqrt(mask['area'] / np.pi) for mask in larger_cluster]
+                    else:
+                        group2_diameters = []
                     
                     img_result.update({
                         'mask_count': result['statistics']['mask_count'],
@@ -2101,6 +2344,62 @@ def download_excel():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/generate_custom_result', methods=['POST'])
+def generate_custom_result():
+    """Generate a custom result image based on user's interactive mask selections."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Required parameters
+        original_image_b64 = data.get('original_image')
+        visible_masks = data.get('visible_masks', [])
+        mode = data.get('mode', 'multiple')
+        
+        if not original_image_b64:
+            return jsonify({'error': 'Original image data required'}), 400
+        
+        # Process the original image
+        image_array = process_image_from_base64(original_image_b64)
+        
+        # Generate custom result image with only visible masks
+        custom_result_image = generate_custom_preview_image(image_array, visible_masks, mode)
+        
+        # Save the custom result to a temporary file for download
+        timestamp = int(time.time() * 1000)
+        filename = f"custom_{mode}_result_{timestamp}.png"
+        
+        # Ensure results folder exists
+        os.makedirs(app.config['RESULTS_FOLDER'], exist_ok=True)
+        filepath = os.path.join(app.config['RESULTS_FOLDER'], filename)
+        
+        print(f"Generating custom result for {mode} mode with {len(visible_masks)} visible masks")
+        
+        # Convert base64 back to image and save
+        if custom_result_image.startswith('data:image/jpeg;base64,'):
+            img_data = custom_result_image.split(',')[1]
+            img_bytes = base64.b64decode(img_data)
+            
+            # Convert JPEG to PNG for consistency
+            from PIL import Image
+            import io
+            jpg_image = Image.open(io.BytesIO(img_bytes))
+            jpg_image.save(filepath, 'PNG')
+        else:
+            return jsonify({'error': 'Invalid image format received'}), 500
+        
+        return jsonify({
+            'success': True,
+            'download_url': f'/download_result/{filename}',
+            'filename': filename,
+            'visible_mask_count': len(visible_masks)
+        })
+        
+    except Exception as e:
+        print(f"Error generating custom result: {str(e)}")
+        return jsonify({'error': f'Failed to generate custom result: {str(e)}'}), 500
 
 if __name__ == '__main__':
     print("Starting Mask Grouping Server...")
