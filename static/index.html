@@ -458,7 +458,11 @@
         }
 
         .satellite-display-image {
-            /* No size modifications - use pure natural dimensions */
+            max-width: 100%;
+            width: 100%;
+            height: auto;
+            display: block;
+            cursor: crosshair;
         }
         
         /* .satellite-hover-image removed - no longer used with embedded bounding boxes */
@@ -732,8 +736,9 @@
 
         .satellite-mask-highlight {
             position: absolute;
-            border: 3px solid #ffff00;
-            box-shadow: 0 0 10px rgba(255, 255, 0, 0.6);
+            border: 3px solid #ff0000;
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.45);
+            background-color: rgba(255, 0, 0, 0.15);
             pointer-events: none;
             z-index: 15;
             opacity: 0;
@@ -764,15 +769,19 @@
         }
 
         .display-image {
-            /* No size modifications - use pure natural dimensions */
+            max-width: 100%;
+            width: 100%;
+            height: auto;
+            display: block;
+            cursor: crosshair;
         }
 
         /* .hover-overlay removed - no longer used with embedded bounding boxes */
 
         .mask-highlight {
             position: absolute;
-            border: 3px solid #ffd700;
-            background-color: rgba(255, 215, 0, 0.2);
+            border: 3px solid #ff0000;
+            background-color: rgba(255, 0, 0, 0.15);
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.2s ease;
@@ -2548,7 +2557,7 @@
             
             resultContainer.innerHTML = `
                 <div class="interactive-satellite-container" id="satelliteContainer">
-                    <img src="${visualizationImageUrl}" alt="Satellite Droplet Analysis" class="satellite-display-image" id="satelliteDisplayImage">
+                    <img src="${originalImageUrl || visualizationImageUrl}" alt="Satellite Droplet Analysis" class="satellite-display-image" id="satelliteDisplayImage">
                     <div class="satellite-mask-highlight" id="satelliteMaskHighlight"></div>
                     <div class="satellite-tooltip" id="satelliteTooltip">
                         <div class="tooltip-group-badge" id="tooltipGroupBadge"></div>
@@ -2589,7 +2598,7 @@
                         setupSatelliteHoverEvents(container, displayImage, allMasks, tooltip, highlight);
                         
                         // No separate overlay drawing needed - bounding boxes are embedded in image
-                        console.log('Using embedded bounding boxes from visualization image');
+                        console.log('Drawing overlays on original/displayed image');
                         // Initialize mask count display
                         setTimeout(() => updateMaskCountDisplay(), 200);
                     }, 100);
@@ -2613,14 +2622,13 @@
                 // throttleTimeout = setTimeout(() => { throttleTimeout = null; }, 50);
                 
                 const rect = displayImage.getBoundingClientRect();
-                
-                // Use direct mouse coordinates relative to image - no transformations
-                const imageX = e.clientX - rect.left;
-                const imageY = e.clientY - rect.top;
+                // Map mouse position from displayed coords to natural image coords
+                const imageX = (e.clientX - rect.left) * (displayImage.naturalWidth / rect.width);
+                const imageY = (e.clientY - rect.top) * (displayImage.naturalHeight / rect.height);
                 
                 // Debug coordinate system
                 if (Math.random() < 0.1) { // Occasional debugging
-                    console.log(`DEBUG COORDS: Mouse(${e.clientX}, ${e.clientY}) Rect(${rect.left}, ${rect.top}) -> Image(${imageX}, ${imageY})`);
+                    console.log(`DEBUG COORDS: Mouse(${e.clientX}, ${e.clientY}) Rect(${rect.left}, ${rect.top}) -> Image(natural: ${imageX}, ${imageY})`);
                     console.log(`DEBUG RECT: left=${rect.left}, top=${rect.top}, width=${rect.width}, height=${rect.height}`);
                     console.log(`DEBUG IMAGE: naturalWidth=${displayImage.naturalWidth}, naturalHeight=${displayImage.naturalHeight}`);
                     console.log(`DEBUG IMAGE: offsetWidth=${displayImage.offsetWidth}, offsetHeight=${displayImage.offsetHeight}`);
@@ -2685,9 +2693,9 @@
             // Add click event for mask toggling
             container.addEventListener('click', function(e) {
                 const rect = displayImage.getBoundingClientRect();
-                // Use direct mouse coordinates relative to image - no transformations
-                const imageX = e.clientX - rect.left;
-                const imageY = e.clientY - rect.top;
+                // Map mouse position from displayed coords to natural image coords
+                const imageX = (e.clientX - rect.left) * (displayImage.naturalWidth / rect.width);
+                const imageY = (e.clientY - rect.top) * (displayImage.naturalHeight / rect.height);
                 
                 // Find the clicked mask
                 let clickedMask = null;
@@ -2750,13 +2758,17 @@
             tooltip.style.top = tooltipY + 'px';
             tooltip.classList.add('visible');
             
-            // Position and show highlight box - use bbox coordinates directly (no scaling)
-            const highlightLeft = bx;
-            const highlightTop = by;
-            const highlightWidth = bw;
-            const highlightHeight = bh;
+            // Position and show highlight box - scale bbox (natural) to displayed coords
+            const displayImage = document.getElementById('satelliteDisplayImage');
+            const rect = displayImage.getBoundingClientRect();
+            const scaleX = rect.width / displayImage.naturalWidth;
+            const scaleY = rect.height / displayImage.naturalHeight;
+            const highlightLeft = Math.round(bx * scaleX);
+            const highlightTop = Math.round(by * scaleY);
+            const highlightWidth = Math.round(bw * scaleX);
+            const highlightHeight = Math.round(bh * scaleY);
             
-            console.log(`HIGHLIGHT DEBUG: bbox[${bx}, ${by}, ${bw}, ${bh}] -> display[${highlightLeft}, ${highlightTop}, ${highlightWidth}, ${highlightHeight}] (1:1 mapping)`);
+            // console.debug(`HIGHLIGHT DEBUG: bbox[natural ${bx}, ${by}, ${bw}, ${bh}] -> display[${highlightLeft}, ${highlightTop}, ${highlightWidth}, ${highlightHeight}]`);
             
             highlight.style.left = highlightLeft + 'px';
             highlight.style.top = highlightTop + 'px';
@@ -3054,14 +3066,14 @@
             if (allMasks.length === 0) {
                 // Fallback to simple image if no mask data
                 resultContainer.innerHTML = `
-                    <img src="${visualizationImageUrl}" alt="${mode} Analysis">
+                    <img src="${originalImageUrl || visualizationImageUrl}" alt="${mode} Analysis" class="display-image">
                 `;
                 return;
             }
             
             resultContainer.innerHTML = `
                 <div class="interactive-container" id="interactiveContainer">
-                    <img src="${visualizationImageUrl}" alt="${mode} Analysis" class="display-image" id="displayImage">
+                    <img src="${originalImageUrl || visualizationImageUrl}" alt="${mode} Analysis" class="display-image" id="displayImage">
                     <div class="mask-highlight" id="maskHighlight"></div>
                     <div class="interactive-tooltip" id="interactiveTooltip">
                         <div class="tooltip-mode-badge" id="tooltipModeBadge"></div>
@@ -3095,8 +3107,6 @@
                         console.log(`Using embedded bounding boxes - no scaling needed`);
                         setupGenericHoverEvents(container, displayImage, allMasks, tooltip, highlight, mode);
                         
-                        // No separate overlay drawing needed - bounding boxes are embedded in image
-                        console.log('Using embedded bounding boxes from visualization image');
                         // Initialize mask count display
                         setTimeout(() => updateMaskCountDisplay(), 200);
                     }, 100);
@@ -3139,9 +3149,9 @@
         function setupGenericHoverEvents(container, displayImage, masks, tooltip, highlight, mode) {
             container.addEventListener('mousemove', function(e) {
                 const rect = displayImage.getBoundingClientRect();
-                // Use direct mouse coordinates relative to image - no transformations
-                const imageX = e.clientX - rect.left;
-                const imageY = e.clientY - rect.top;
+                // Map mouse position from displayed coords to natural image coords
+                const imageX = (e.clientX - rect.left) * (displayImage.naturalWidth / rect.width);
+                const imageY = (e.clientY - rect.top) * (displayImage.naturalHeight / rect.height);
                 
                 // Debug coordinate system (generic mode)
                 if (Math.random() < 0.1) { // Occasional debugging
@@ -3178,9 +3188,9 @@
             // Add click event for mask toggling
             container.addEventListener('click', function(e) {
                 const rect = displayImage.getBoundingClientRect();
-                // Use direct mouse coordinates relative to image - no transformations
-                const imageX = e.clientX - rect.left;
-                const imageY = e.clientY - rect.top;
+                // Map mouse position from displayed coords to natural image coords
+                const imageX = (e.clientX - rect.left) * (displayImage.naturalWidth / rect.width);
+                const imageY = (e.clientY - rect.top) * (displayImage.naturalHeight / rect.height);
                 
                 // Find the clicked mask
                 let clickedMask = null;
@@ -3258,11 +3268,15 @@
             tooltip.style.opacity = '1';
             tooltip.style.pointerEvents = 'none';
             
-            // Show highlight - use bbox coordinates directly (no scaling)
-            const highlightX = bx;
-            const highlightY = by;
-            const highlightW = bw;
-            const highlightH = bh;
+            // Show highlight - scale bbox (natural) to displayed image coords
+            const displayImage = document.getElementById('displayImage');
+            const rect = displayImage.getBoundingClientRect();
+            const scaleX = rect.width / displayImage.naturalWidth;
+            const scaleY = rect.height / displayImage.naturalHeight;
+            const highlightX = Math.round(bx * scaleX);
+            const highlightY = Math.round(by * scaleY);
+            const highlightW = Math.round(bw * scaleX);
+            const highlightH = Math.round(bh * scaleY);
             
             highlight.style.left = highlightX + 'px';
             highlight.style.top = highlightY + 'px';
