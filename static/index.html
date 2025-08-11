@@ -2556,8 +2556,9 @@
             }
             
             resultContainer.innerHTML = `
-                <div class="interactive-satellite-container" id="satelliteContainer">
+                <div class="interactive-satellite-container" id="satelliteContainer" style="position: relative; display: inline-block;">
                     <img src="${originalImageUrl || visualizationImageUrl}" alt="Satellite Droplet Analysis" class="satellite-display-image" id="satelliteDisplayImage">
+                    <canvas id="satelliteOverlayCanvas" style="position:absolute;top:0;left:0;pointer-events:none;z-index:12;"></canvas>
                     <div class="satellite-mask-highlight" id="satelliteMaskHighlight"></div>
                     <div class="satellite-tooltip" id="satelliteTooltip">
                         <div class="tooltip-group-badge" id="tooltipGroupBadge"></div>
@@ -2581,12 +2582,22 @@
                 if (displayImage.complete) {
                     // Image loaded with embedded bounding boxes
                     setTimeout(() => {
-                        // Let image use natural dimensions - no explicit sizing
+                        // Prepare always-on overlay canvas sized to displayed image
                         const naturalWidth = displayImage.naturalWidth;
                         const naturalHeight = displayImage.naturalHeight;
+                        const canvas = document.getElementById('satelliteOverlayCanvas');
+                        canvas.width = displayImage.offsetWidth;
+                        canvas.height = displayImage.offsetHeight;
+                        canvas.style.width = displayImage.offsetWidth + 'px';
+                        canvas.style.height = displayImage.offsetHeight + 'px';
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        const scaleX = displayImage.offsetWidth / naturalWidth;
+                        const scaleY = displayImage.offsetHeight / naturalHeight;
+                        // Draw all bounding boxes initially
+                        drawOverlayOnCanvas(canvas, displayImage, allMasks);
                         
                         console.log(`Using natural dimensions: ${naturalWidth}x${naturalHeight}px`);
-                        console.log(`Image loaded with embedded bounding boxes: ${displayImage.naturalWidth}x${displayImage.naturalHeight}`);
                         console.log(`Container displayed size: ${displayImage.offsetWidth}x${displayImage.offsetHeight}`);
                         
                         // Log first few mask bounding boxes for verification
@@ -2853,12 +2864,7 @@
 
         // Update satellite visualization after mask toggle
         function updateSatelliteVisualization() {
-            const highlights = document.querySelectorAll('.satellite-mask-overlay');
-            highlights.forEach(h => h.remove());
-            
-            // NOTE: Visual updates now handled by regenerating the image with new mask visibility
-            // Bounding boxes are embedded in the image, so no overlay redrawing needed
-            console.log('Mask visibility updated - using embedded bounding boxes');
+            redrawSatelliteOverlay();
         }
 
         // NOTE: Overlay drawing removed - bounding boxes are now embedded in the visualization image
@@ -3074,6 +3080,7 @@
             resultContainer.innerHTML = `
                 <div class="interactive-container" id="interactiveContainer">
                     <img src="${originalImageUrl || visualizationImageUrl}" alt="${mode} Analysis" class="display-image" id="displayImage">
+                    <canvas id="genericOverlayCanvas" style="position:absolute;top:0;left:0;pointer-events:none;z-index:8;"></canvas>
                     <div class="mask-highlight" id="maskHighlight"></div>
                     <div class="interactive-tooltip" id="interactiveTooltip">
                         <div class="tooltip-mode-badge" id="tooltipModeBadge"></div>
@@ -3097,9 +3104,20 @@
             function checkImageLoaded() {
                 if (displayImage.complete) {
                     setTimeout(() => {
-                        // Let image use natural dimensions - no explicit sizing
                         const naturalWidth = displayImage.naturalWidth;
                         const naturalHeight = displayImage.naturalHeight;
+                        // Prepare always-on overlay canvas sized to displayed image
+                        const canvas = document.getElementById('genericOverlayCanvas');
+                        canvas.width = displayImage.offsetWidth;
+                        canvas.height = displayImage.offsetHeight;
+                        canvas.style.width = displayImage.offsetWidth + 'px';
+                        canvas.style.height = displayImage.offsetHeight + 'px';
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        const scaleX = displayImage.offsetWidth / naturalWidth;
+                        const scaleY = displayImage.offsetHeight / naturalHeight;
+                        // Draw all bounding boxes initially
+                        drawOverlayOnCanvas(canvas, displayImage, allMasks);
                         
                         console.log(`Using natural dimensions: ${naturalWidth}x${naturalHeight}px`);
                         console.log(`Image loaded with embedded bounding boxes: ${displayImage.naturalWidth}x${displayImage.naturalHeight}`);
@@ -3296,12 +3314,58 @@
 
         // Update visualization for generic modes  
         function updateGenericVisualization() {
-            const highlights = document.querySelectorAll('.mask-overlay');
-            highlights.forEach(h => h.remove());
-            
-            // NOTE: Visual updates now handled by regenerating the image with new mask visibility  
-            // Bounding boxes are embedded in the image, so no overlay redrawing needed
-            console.log('Generic mask visibility updated - using embedded bounding boxes');
+            redrawGenericOverlay();
+        }
+
+        // Redraw helpers to render all boxes with dashed style for hidden masks
+        function drawOverlayOnCanvas(canvas, imageEl, masks) {
+            if (!canvas || !imageEl || !masks) return;
+            const ctx = canvas.getContext('2d');
+            const naturalWidth = imageEl.naturalWidth;
+            const naturalHeight = imageEl.naturalHeight;
+            const width = imageEl.offsetWidth;
+            const height = imageEl.offsetHeight;
+            if (width === 0 || height === 0 || naturalWidth === 0 || naturalHeight === 0) return;
+            canvas.width = width;
+            canvas.height = height;
+            canvas.style.width = width + 'px';
+            canvas.style.height = height + 'px';
+            const scaleX = width / naturalWidth;
+            const scaleY = height / naturalHeight;
+            ctx.clearRect(0, 0, width, height);
+            for (let i = 0; i < masks.length; i++) {
+                const m = masks[i];
+                const [bx, by, bw, bh] = m.bbox;
+                const x = Math.round(bx * scaleX);
+                const y = Math.round(by * scaleY);
+                const w = Math.round(bw * scaleX);
+                const h = Math.round(bh * scaleY);
+                if (m.hidden) {
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([6, 4]);
+                    ctx.strokeRect(x, y, w, h);
+                } else {
+                    ctx.setLineDash([]);
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.fillStyle = 'rgba(255,0,0,0.12)';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillRect(x, y, w, h);
+                }
+            }
+        }
+
+        function redrawSatelliteOverlay() {
+            const canvas = document.getElementById('satelliteOverlayCanvas');
+            const img = document.getElementById('satelliteDisplayImage');
+            drawOverlayOnCanvas(canvas, img, activeMasks || []);
+        }
+
+        function redrawGenericOverlay() {
+            const canvas = document.getElementById('genericOverlayCanvas');
+            const img = document.getElementById('displayImage');
+            drawOverlayOnCanvas(canvas, img, activeMasks || []);
         }
 
         // Update statistics for generic modes
